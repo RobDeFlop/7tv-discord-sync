@@ -26,10 +26,7 @@ export class TrendingFill extends ReconcileStep {
 
   private async removeAll(synced: SyncedServer, report: SyncReport): Promise<void> {
     for (const managed of synced.state.managedOfTier("trending")) {
-      const emoji = synced.emojiOf(managed);
-      await synced.deleteEmoji(emoji);
-      synced.state.removeManagedEmote(managed);
-      report.change({ type: "deleted", name: emoji.name, reason: "trending-off" });
+      await synced.removeManaged(managed, report, "trending-off");
     }
   }
 

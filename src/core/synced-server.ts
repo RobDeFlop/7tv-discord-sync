@@ -1,5 +1,7 @@
 import {
   ServerQuotas,
+  type Change,
+  type ManagedEmote,
   type Quota,
   type DiscordEmoji,
   type EmojiImage,
@@ -8,6 +10,8 @@ import {
   type SlotOccupant,
 } from "../domain/index.ts";
 import type { DiscordPort } from "../ports/index.ts";
+
+import type { SyncReport } from "./sync-report.ts";
 
 /**
  * One Server's stored state together with its live Discord emojis, kept
@@ -72,6 +76,18 @@ export class SyncedServer {
   public async renameEmoji(emoji: DiscordEmoji, name: string): Promise<void> {
     await this.discord.renameEmoji(this.id, emoji.id, name);
     this.emojis = this.emojis.map((e) => (e.id === emoji.id ? { ...e, name } : e));
+  }
+
+  public async removeManaged(
+    managed: ManagedEmote,
+    report: SyncReport,
+    reason: Extract<Change, { type: "deleted" }>["reason"],
+  ): Promise<DiscordEmoji> {
+    const emoji = this.emojiOf(managed);
+    await this.deleteEmoji(emoji);
+    this.state.removeManagedEmote(managed);
+    report.change({ type: "deleted", name: emoji.name, reason });
+    return emoji;
   }
 
   public async deleteEmoji(emoji: DiscordEmoji): Promise<void> {
