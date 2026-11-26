@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import sharp from "sharp";
-import { prepareEmojiImage } from "./pipeline.ts";
+import { ImagePipeline } from "./pipeline.ts";
 
 const LIMIT = 256 * 1024;
 
@@ -32,9 +32,9 @@ async function animatedFixture(size: number, frames: number) {
     .toBuffer();
 }
 
-describe("prepareEmojiImage", () => {
+describe("ImagePipeline", () => {
   test("converts a static WebP to a PNG under the limit", async () => {
-    const result = await prepareEmojiImage(await staticFixture(128, "webp"));
+    const result = await new ImagePipeline().prepare(await staticFixture(128, "webp"));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.image.animated).toBe(false);
@@ -44,7 +44,7 @@ describe("prepareEmojiImage", () => {
   });
 
   test("converts a static AVIF to PNG", async () => {
-    const result = await prepareEmojiImage(await staticFixture(64, "avif"));
+    const result = await new ImagePipeline().prepare(await staticFixture(64, "avif"));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect((await sharp(result.image.bytes).metadata()).format).toBe("png");
@@ -53,7 +53,7 @@ describe("prepareEmojiImage", () => {
   test("downscales an oversized static image under the limit", async () => {
     const input = await staticFixture(600, "png");
     expect(input.length).toBeGreaterThan(LIMIT);
-    const result = await prepareEmojiImage(input);
+    const result = await new ImagePipeline().prepare(input);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.image.bytes.length).toBeLessThan(LIMIT);
@@ -64,7 +64,7 @@ describe("prepareEmojiImage", () => {
 
   test("converts an animated WebP to an animated GIF under the limit", async () => {
     const input = await animatedFixture(96, 8);
-    const result = await prepareEmojiImage(input);
+    const result = await new ImagePipeline().prepare(input);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.image.animated).toBe(true);
@@ -76,7 +76,7 @@ describe("prepareEmojiImage", () => {
 
   test("shrinks a heavy animation by downscaling and dropping frames", async () => {
     const input = await animatedFixture(256, 30);
-    const result = await prepareEmojiImage(input);
+    const result = await new ImagePipeline().prepare(input);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.image.bytes.length).toBeLessThan(LIMIT);
@@ -84,12 +84,12 @@ describe("prepareEmojiImage", () => {
   });
 
   test("reports too-large when it cannot fit under the limit", async () => {
-    const result = await prepareEmojiImage(await staticFixture(200, "png"), { maxBytes: 100 });
+    const result = await new ImagePipeline({ maxBytes: 100 }).prepare(await staticFixture(200, "png"));
     expect(result).toEqual({ ok: false, reason: "too-large" });
   });
 
   test("reports unavailable for bytes that are not an image", async () => {
-    const result = await prepareEmojiImage(new TextEncoder().encode("not an image"));
+    const result = await new ImagePipeline().prepare(new TextEncoder().encode("not an image"));
     expect(result).toEqual({ ok: false, reason: "unavailable" });
   });
 });

@@ -1,16 +1,21 @@
-export interface Clock {
-  now(): number;
-  sleep(ms: number): Promise<void>;
+export abstract class Clock {
+  public abstract now(): number;
+  public abstract sleep(ms: number): Promise<void>;
 }
 
-export const systemClock: Clock = {
-  now: () => Date.now(),
-  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-};
+export class SystemClock extends Clock {
+  public now(): number {
+    return Date.now();
+  }
+
+  public sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+}
 
 /** A write hit Discord's rate limit; the queue waits and retries. */
 export class RateLimitError extends Error {
-  constructor(public readonly retryAfterMs: number) {
+  public constructor(public readonly retryAfterMs: number) {
     super(`Rate limited, retry after ${retryAfterMs}ms`);
   }
 }
@@ -36,16 +41,16 @@ interface Lane {
 
 /** Serial write queue per key (Server). Retries 429s in the background. */
 export class WriteQueue {
-  private lanes = new Map<string, Lane>();
-  private clock: Clock;
-  private maxAttempts: number;
+  private readonly lanes = new Map<string, Lane>();
+  private readonly clock: Clock;
+  private readonly maxAttempts: number;
 
-  constructor(opts: { clock?: Clock; maxAttempts?: number } = {}) {
-    this.clock = opts.clock ?? systemClock;
+  public constructor(opts: { clock?: Clock; maxAttempts?: number } = {}) {
+    this.clock = opts.clock ?? new SystemClock();
     this.maxAttempts = opts.maxAttempts ?? 5;
   }
 
-  enqueue<T>(key: string, task: () => Promise<T>): Promise<T> {
+  public enqueue<T>(key: string, task: () => Promise<T>): Promise<T> {
     let lane = this.lanes.get(key);
     if (!lane) {
       lane = { jobs: [], running: false, retryingAt: null };
@@ -59,7 +64,7 @@ export class WriteQueue {
     return promise;
   }
 
-  progress(key: string): QueueProgress {
+  public progress(key: string): QueueProgress {
     const lane = this.lanes.get(key);
     return { pending: lane?.jobs.length ?? 0, retryingAt: lane?.retryingAt ?? null };
   }

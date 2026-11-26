@@ -1,16 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { RateLimitError, WriteQueue, type Clock } from "./write-queue.ts";
+import { Clock, RateLimitError, WriteQueue } from "./write-queue.ts";
 
-export class FakeClock implements Clock {
+export class FakeClock extends Clock {
   private t = 0;
   private timers: { at: number; resolve: () => void }[] = [];
-  now() {
+  public now() {
     return this.t;
   }
-  sleep(ms: number) {
+  public sleep(ms: number) {
     return new Promise<void>((resolve) => this.timers.push({ at: this.t + ms, resolve }));
   }
-  async advance(ms: number) {
+  public async advance(ms: number) {
     this.t += ms;
     const due = this.timers.filter((x) => x.at <= this.t);
     this.timers = this.timers.filter((x) => x.at > this.t);
