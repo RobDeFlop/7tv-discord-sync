@@ -72,6 +72,20 @@ describe("reconcile mirrors the Source Set", () => {
     expect(r.changes.some((c) => c.type === "renamed")).toBe(true);
   });
 
+  test("an unresolvable active set preserves the mirror; no active set empties it", async () => {
+    const { sevenTv, core, names, emotes } = setup();
+    emotes(["a"]);
+    sevenTv.setEmotes("setA", "Main", ["a"]);
+    await core.apply(S, new LinkSourceSetCommand(userLink("u1")));
+    sevenTv.setActiveSet("u1", "missing");
+    const result = await core.reconcile(S);
+    expect(names()).toEqual(["AA"]);
+    expect(result.feedback.some((f) => f.level === "warning" && f.text.includes("Source Set"))).toBe(true);
+    sevenTv.setActiveSet("u1", null);
+    await core.reconcile(S);
+    expect(names()).toEqual([]);
+  });
+
   test("follows the user when their active set switches", async () => {
     const { sevenTv, core, names, emotes } = setup();
     emotes(["a", "b", "c"]);
