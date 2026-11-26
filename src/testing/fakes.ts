@@ -4,6 +4,7 @@ import {
   ServerQuotas,
   ServerState,
   type DiscordEmoji,
+  type DiscordEmojiId,
   type EmojiImage,
   type ServerId,
   type ServerStateSnapshot,
@@ -36,8 +37,7 @@ interface FakeServer {
 export class FakeDiscord extends DiscordPort {
   private readonly servers = new Map<ServerId, FakeServer>();
   private nextId = 1;
-  /** Image bytes by emoji id, to assert which 7TV image was uploaded. */
-  public readonly images = new Map<string, EmojiImage>();
+  private readonly images = new Map<DiscordEmojiId, EmojiImage>();
 
   public addServer(id: ServerId, opts: { boostLevel?: number } = {}): void {
     this.servers.set(id, { boostLevel: opts.boostLevel ?? 0, emojis: [], canManage: true });
@@ -116,6 +116,20 @@ export class FakeDiscord extends DiscordPort {
     return this.emojis(id);
   }
 
+  public seedEmojiImage(emojiId: DiscordEmojiId, image: EmojiImage): void {
+    this.images.set(emojiId, { bytes: new Uint8Array(image.bytes), animated: image.animated });
+  }
+
+  public emojiImageSnapshot(emojiId: DiscordEmojiId): EmojiImage | null {
+    const image = this.images.get(emojiId);
+    return image ? { bytes: new Uint8Array(image.bytes), animated: image.animated } : null;
+  }
+
+  public async downloadEmojiImage(id: ServerId, emoji: DiscordEmoji): Promise<EmojiImage | null> {
+    if (!this.server(id).emojis.some((e) => e.id === emoji.id)) return null;
+    return this.emojiImageSnapshot(emoji.id);
+  }
+
   public async createEmoji(id: ServerId, emoji: { name: string; image: EmojiImage }): Promise<DiscordEmoji> {
     const s = this.server(id);
     this.assertCanManage(id);
@@ -131,7 +145,7 @@ export class FakeDiscord extends DiscordPort {
     if (emoji.image.bytes.byteLength > MAX_EMOJI_BYTES) throw new Error("Emoji file too large");
     if (s.emojis.some((e) => e.name === emoji.name)) throw new Error(`Name taken: ${emoji.name}`);
     const created = this.seedEmoji(id, { name: emoji.name, animated: emoji.image.animated });
-    this.images.set(created.id, emoji.image);
+    this.seedEmojiImage(created.id, emoji.image);
     return created;
   }
 
@@ -257,7 +271,9 @@ export class FakeSevenTv extends SevenTvPort {
     const emote = this.emotes.get(id);
     if (!emote || this.unavailableImages.has(id)) return { ok: false, reason: "unavailable" };
     const size = this.imageSizes.get(id) ?? 0;
-    if (size > MAX_EMOJI_BYTES) return { ok: false, reason: "too-large" };
+    if (size > MAX_EMOJI_BYTES) {
+      return { ok: false, reason: "too-large", previewImage: { bytes: new Uint8Array(1024), animated: false } };
+    }
     return { ok: true, image: { bytes: new Uint8Array(size), animated: emote.animated } };
   }
 

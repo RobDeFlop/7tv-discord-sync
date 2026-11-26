@@ -1,6 +1,8 @@
 import {
   DomainError,
   ServerQuotas,
+  type EmojiImage,
+  type FeedbackMessage,
   type ServerId,
   type ServerStatus,
   type SyncResult,
@@ -11,10 +13,19 @@ import {
 import type { DiscordPort, SevenTvPort, StorePort } from "../ports/index.ts";
 import { LinkSourceSetCommand } from "./commands/link-source-set-command.ts";
 import type { Command } from "./commands/command.ts";
+import { PreparedEmotePromotion, PreparedEmoteUpload, type PreparedEmoteAdd } from "./commands/prepared-emote-add.ts";
+import { ImageFailure } from "./image-failure.ts";
 import { SyncContext } from "./sync-context.ts";
 import type { SyncedServer } from "./synced-server.ts";
 
 export * from "./commands/index.ts";
+
+type EmoteAddPreparation =
+  | ({ originalName: string; previewImage: EmojiImage } & (
+    | { prepared: PreparedEmoteAdd }
+    | { importFailure: "too-large" }
+  ))
+  | { feedback: FeedbackMessage };
 
 /** The sync core's public interface. */
 export class SyncCore {
@@ -27,6 +38,38 @@ export class SyncCore {
   /** Validate a link before accepting a background sync; this does not mutate Server state. */
   public async prepareSourceLink(link: string): Promise<LinkSourceSetCommand> {
     return new LinkSourceSetCommand(await this.context.sevenTv.resolveUserLink(link));
+  }
+
+  /** Prepare an emote preview without saving state or changing any Discord emojis. */
+  public async prepareEmoteAdd(server: ServerId, link: string): Promise<EmoteAddPreparation> {
+    const emote = await this.context.sevenTv.resolveEmoteLink(link);
+    const synced = await this.context.load(server);
+    const managed = synced.state.findManaged(emote.id);
+    const existing = managed ? synced.emojiOf(managed) : undefined;
+    const result = await this.context.sevenTv.downloadImage(emote.id).catch((error: unknown) => {
+      if (!existing) throw error;
+      return { ok: false, reason: "unavailable" } as const;
+    });
+    if (!result.ok) {
+      if (existing) {
+        const previewImage = await this.context.discord.downloadEmojiImage(server, existing);
+        if (previewImage) return {
+          originalName: emote.name,
+          previewImage,
+          prepared: new PreparedEmotePromotion(emote, existing.name, existing.id),
+        };
+      }
+      if (result.reason === "too-large") return { originalName: emote.name, previewImage: result.previewImage, importFailure: result.reason };
+      return { feedback: { level: "error", text: `Could not preview this emote. ${new ImageFailure(emote, result.reason).text}` } };
+    }
+
+    let defaultName = existing?.name;
+    if (defaultName === undefined) {
+      const plan = await this.context.allocator.plan(synced, ServerQuotas.quotaOf(emote.animated), "requested");
+      defaultName = this.context.allocator.placementName(synced, emote.name, plan.ok ? plan.displace : null).name;
+    }
+    const prepared = new PreparedEmoteUpload(emote, defaultName, result.image);
+    return { originalName: emote.name, previewImage: prepared.uploadImage, prepared };
   }
 
   /** Apply an admin command to a Server. Domain errors come back as feedback. */

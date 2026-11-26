@@ -12,7 +12,10 @@ import { RateLimitError, WriteQueue } from "./write-queue.ts";
 
 /** One discord.js Guild behind the gateway; turns a 429 into RateLimitError so the write queue retries it. */
 export class DiscordJsGuild extends GuildGateway {
-  public constructor(private readonly guild: Guild) {
+  public constructor(
+    private readonly guild: Guild,
+    private readonly http: (url: string, init: RequestInit) => Promise<Response> = fetch,
+  ) {
     super();
   }
 
@@ -28,6 +31,18 @@ export class DiscordJsGuild extends GuildGateway {
   public async listEmojis(): Promise<DiscordEmoji[]> {
     const all = await this.guild.emojis.fetch();
     return [...all.values()].map((e) => DiscordJsGuild.toEmoji(e));
+  }
+
+  public async downloadEmojiImage(emoji: DiscordEmoji): Promise<EmojiImage | null> {
+    const { id, animated } = emoji;
+    const url = this.guild.client.rest.cdn.emoji(id, { extension: animated ? "gif" : "png" });
+    try {
+      const response = await this.http(url, { redirect: "error" });
+      if (!response.ok) return null;
+      return { bytes: new Uint8Array(await response.arrayBuffer()), animated };
+    } catch {
+      return null;
+    }
   }
 
   public createEmoji(name: string, image: EmojiImage): Promise<DiscordEmoji> {

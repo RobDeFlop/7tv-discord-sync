@@ -26,6 +26,11 @@ export class SlotAllocator {
     return synced.state.planSlot(quota, tier, synced.usedIn(quota), quotas.limit());
   }
 
+  public placementName(synced: SyncedServer, wantedName: string, displace: ManagedEmote | null): Placement {
+    const taken = displace ? synced.emojiNamesExcept(displace.discordEmojiId) : synced.emojiNames();
+    return EmoteNamer.unique(wantedName, taken);
+  }
+
   /**
    * Perform a successful plan: delete the displaced Managed Emote if any, create
    * the emoji under a free name and register it as a Managed Emote of `tier`.
@@ -40,12 +45,12 @@ export class SlotAllocator {
     wantedName: string,
   ): Promise<Placement> {
     const { state } = synced;
+    const { name, suffixed } = this.placementName(synced, wantedName, plan.displace);
     let victim: DiscordEmoji | undefined;
     if (plan.displace) {
       victim = await synced.removeManaged(plan.displace, report, "displaced");
       report.say("warning", `${victim.name} (${plan.displace.tier}) was removed to make room for ${emote.name}.`);
     }
-    const { name, suffixed } = EmoteNamer.unique(wantedName, synced.emojiNames());
     let created: DiscordEmoji;
     try {
       created = await synced.createEmoji(name, image);

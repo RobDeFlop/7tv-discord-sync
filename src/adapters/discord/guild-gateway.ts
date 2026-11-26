@@ -5,6 +5,7 @@ export abstract class GuildGateway {
   public abstract get premiumTier(): number;
   public abstract canManageExpressions(): Promise<boolean>;
   public abstract listEmojis(): Promise<DiscordEmoji[]>;
+  public abstract downloadEmojiImage(emoji: DiscordEmoji): Promise<EmojiImage | null>;
   public abstract createEmoji(name: string, image: EmojiImage): Promise<DiscordEmoji>;
   public abstract renameEmoji(id: string, name: string): Promise<void>;
   public abstract deleteEmoji(id: string): Promise<void>;
