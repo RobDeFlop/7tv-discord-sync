@@ -8,6 +8,7 @@ import { SetUnlinkSlashCommand } from "./commands/set-unlink-slash-command.ts";
 import { StatusSlashCommand } from "./commands/status-slash-command.ts";
 import { SyncSlashCommand } from "./commands/sync-slash-command.ts";
 import { TrendingSlashCommand } from "./commands/trending-slash-command.ts";
+import type { GatewayEvents } from "./gateway-events.ts";
 import type { ServerLock } from "./server-lock.ts";
 import type { SlashCommand, SlashOption } from "./slash-command.ts";
 import type { SlashRequest } from "./slash-request.ts";
@@ -37,14 +38,14 @@ export class SlashCommandRegistry {
 
   private readonly commands: ReadonlyMap<string, SlashCommand>;
 
-  public constructor(core: SyncCore, lock: ServerLock) {
+  public constructor(core: SyncCore, lock: ServerLock, events: GatewayEvents) {
     const all: SlashCommand[] = [
       new EmoteAddSlashCommand(core, lock),
       new EmoteRemoveSlashCommand(core, lock),
-      new SetLinkSlashCommand(core, lock),
+      new SetLinkSlashCommand(core, lock, events),
       new SetUnlinkSlashCommand(core, lock),
-      new TrendingSlashCommand(core, lock),
-      new SyncSlashCommand(core, lock),
+      new TrendingSlashCommand(core, lock, events),
+      new SyncSlashCommand(core, lock, events),
       new StatusSlashCommand(core, lock),
       new ConfigLogChannelSlashCommand(core, lock),
     ];

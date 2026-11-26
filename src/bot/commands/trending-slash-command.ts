@@ -1,5 +1,8 @@
-import { SetTrendingCommand } from "../../core/index.ts";
+import { SetTrendingCommand, type SyncCore } from "../../core/index.ts";
 import type { ServerId, TrendingPeriod } from "../../domain/index.ts";
+import { RateLimitError } from "../../ports/discord-port.ts";
+import type { GatewayEvents } from "../gateway-events.ts";
+import type { ServerLock } from "../server-lock.ts";
 import { SlashCommand, type SlashOption } from "../slash-command.ts";
 import type { SlashRequest } from "../slash-request.ts";
 
@@ -17,9 +20,18 @@ export class TrendingSlashCommand extends SlashCommand {
     },
   ];
 
-  protected run(server: ServerId, request: SlashRequest): Promise<string> {
+  public constructor(core: SyncCore, lock: ServerLock, private readonly events: GatewayEvents) {
+    super(core, lock);
+  }
+
+  protected async run(server: ServerId, request: SlashRequest): Promise<string> {
     const enabled = this.requiredString(request, "state") === "on";
     const period = (request.stringOption("period") ?? undefined) as TrendingPeriod | undefined;
-    return this.apply(server, new SetTrendingCommand(enabled, period));
+    try {
+      return await this.apply(server, new SetTrendingCommand(enabled, period));
+    } catch (error) {
+      if (!(error instanceof RateLimitError)) throw error;
+      return this.events.resumeAfterRateLimit(server, error);
+    }
   }
 }

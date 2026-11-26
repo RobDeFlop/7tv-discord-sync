@@ -1,15 +1,15 @@
-import type { ServerId, SyncResult } from "../../domain/index.ts";
+import type { ServerId, SevenTvUser, SyncResult } from "../../domain/index.ts";
 import type { SyncContext } from "../sync-context.ts";
 import { Command } from "./command.ts";
 
 /** Link a 7TV user; their active set becomes the Source Set. */
 export class LinkSourceSetCommand extends Command {
-  public constructor(private readonly link: string) {
+  public constructor(private readonly link: string | SevenTvUser) {
     super();
   }
 
   public async execute(server: ServerId, context: SyncContext): Promise<SyncResult> {
-    const user = await context.sevenTv.resolveUserLink(this.link);
+    const user = typeof this.link === "string" ? await context.sevenTv.resolveUserLink(this.link) : this.link;
     const state = await context.store.load(server);
     state.linkUser(user.id);
     await context.store.save(server, state);

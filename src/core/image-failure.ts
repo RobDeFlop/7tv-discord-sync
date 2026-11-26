@@ -21,6 +21,17 @@ export class ImageFailure {
     private readonly reason: FailureReason,
   ) {}
 
+  public static confirmKnown(state: ServerState, sevenTvEmoteId: string): boolean {
+    let known = false;
+    for (const { kind } of Object.values(ImageFailure.DETAILS)) {
+      const match = { kind, sevenTvEmoteId };
+      if (!state.hasProblem(match)) continue;
+      state.confirmProblem(match);
+      known = true;
+    }
+    return known;
+  }
+
   public get text(): string {
     return ImageFailure.DETAILS[this.reason].text(this.emote.name);
   }

@@ -72,6 +72,20 @@ describe("reconcile mirrors the Source Set", () => {
     expect(r.changes.some((c) => c.type === "renamed")).toBe(true);
   });
 
+  test("an unresolvable active set preserves the mirror; no active set empties it", async () => {
+    const { sevenTv, core, names, emotes } = setup();
+    emotes(["a"]);
+    sevenTv.setEmotes("setA", "Main", ["a"]);
+    await core.apply(S, new LinkSourceSetCommand(userLink("u1")));
+    sevenTv.setActiveSet("u1", "missing");
+    const result = await core.reconcile(S);
+    expect(names()).toEqual(["AA"]);
+    expect(result.feedback.some((f) => f.level === "warning" && f.text.includes("Source Set"))).toBe(true);
+    sevenTv.setActiveSet("u1", null);
+    await core.reconcile(S);
+    expect(names()).toEqual([]);
+  });
+
   test("follows the user when their active set switches", async () => {
     const { sevenTv, core, names, emotes } = setup();
     emotes(["a", "b", "c"]);
@@ -169,6 +183,24 @@ describe("emotes that do not fit", () => {
 });
 
 describe("add displaces Source Set emotes", () => {
+  test("a failed replacement reports the displaced emote and restores it on the next sync", async () => {
+    const { sevenTv, discord, core, names, emotes } = setup();
+    for (let i = 0; i < 49; i++) discord.seedEmoji(S, { name: `hand${i}`, animated: false });
+    emotes(["a", "r"]);
+    sevenTv.setEmotes("setA", "Main", ["a"]);
+    await core.apply(S, new LinkSourceSetCommand(userLink("u1")));
+    discord.failCreatesAfter(S, 0, new Error("upload failed"));
+
+    const result = await core.apply(S, new AddEmoteCommand(emoteLink("r")));
+    expect(errors(result)[0]?.text).toMatch(/AA.*next sync/);
+    expect(names()).not.toContain("RR");
+    expect((await core.status(S)).quotas.static.free).toBe(1);
+    discord.allowCreates(S);
+    await core.reconcile(S);
+    expect(names()).toContain("AA");
+    expect((await core.status(S)).quotas.static.byTier).toMatchObject({ requested: 0, source: 1, reserved: 49 });
+  });
+
   test("a Requested Emote displaces a Source Set emote with feedback; it returns as pending, not re-added", async () => {
     const { sevenTv, discord, core, names, emotes } = setup();
     for (let i = 0; i < 49; i++) discord.seedEmoji(S, { name: `hand${i}`, animated: false });
