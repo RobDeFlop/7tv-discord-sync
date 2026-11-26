@@ -29,6 +29,32 @@ describe("Trending Fill", () => {
   });
 });
 
+describe("Manage Expressions permission", () => {
+  test("reconcile reports a missing permission up front, even when nothing needs writing", async () => {
+    const { discord, core } = setup();
+    discord.revokeManageExpressions(S);
+    const r = await core.reconcile(S);
+    expect(r.feedback.filter((f) => f.level === "error").map((f) => f.text.includes("Manage Expressions"))).toEqual([true]);
+  });
+
+  test("reconcile attempts no writes without the permission", async () => {
+    const { discord, sevenTv, core, emotes } = setup();
+    emotes(["a"]);
+    sevenTv.setEmotes("setA", "Main", ["a"]);
+    discord.revokeManageExpressions(S);
+    const r = await core.apply(S, new LinkSourceSetCommand(userLink("u1")));
+    expect(r.feedback.filter((f) => f.level === "error")).toHaveLength(1);
+    expect(discord.emojis(S)).toEqual([]);
+  });
+
+  test("/status shows whether the permission is missing", async () => {
+    const { discord, core } = setup();
+    expect((await core.status(S)).manageExpressions).toBe(true);
+    discord.revokeManageExpressions(S);
+    expect((await core.status(S)).manageExpressions).toBe(false);
+  });
+});
+
 describe("state survives unexpected errors", () => {
   test("emojis created before a failing write stay Managed, not Reserved", async () => {
     const { discord, sevenTv, core, emotes } = setup();

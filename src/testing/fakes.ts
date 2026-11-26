@@ -82,7 +82,7 @@ export class FakeDiscord extends DiscordPort {
     return super.getQuotas(id);
   }
 
-  public async hasManageExpressions(id: ServerId): Promise<boolean> {
+  public override async hasManageExpressions(id: ServerId): Promise<boolean> {
     return this.server(id).canManage;
   }
 
