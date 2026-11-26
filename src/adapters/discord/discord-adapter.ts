@@ -13,7 +13,7 @@ export class DiscordAdapter extends DiscordPort {
   }
 
   /** Pending writes and rate-limit retry time for a Server, for /status. */
-  public queueProgress(server: ServerId): QueueProgress {
+  public override queueProgress(server: ServerId): QueueProgress {
     return this.queue.progress(server);
   }
 
@@ -30,7 +30,7 @@ export class DiscordAdapter extends DiscordPort {
   }
 
   public createEmoji(server: ServerId, emoji: { name: string; image: EmojiImage }): Promise<DiscordEmoji> {
-    return this.write(server, (g) => g.createEmoji(emoji.name, emoji.image.bytes));
+    return this.write(server, (g) => g.createEmoji(emoji.name, emoji.image));
   }
 
   public renameEmoji(server: ServerId, emojiId: string, name: string): Promise<void> {

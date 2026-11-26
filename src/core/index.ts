@@ -44,6 +44,7 @@ export class SyncCore {
     const quotas = await this.context.discord.getQuotas(server);
     const { state } = synced;
     return {
+      writeQueue: this.context.discord.queueProgress(server),
       quotas: {
         static: this.usage(synced, "static", quotas),
         animated: this.usage(synced, "animated", quotas),
