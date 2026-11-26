@@ -14,7 +14,7 @@ export class SyncContext {
     public readonly discord: DiscordPort,
     public readonly store: StorePort,
   ) {
-    this.allocator = new SlotAllocator(discord);
+    this.allocator = new SlotAllocator();
     this.reconciler = new Reconciler(this);
   }
 

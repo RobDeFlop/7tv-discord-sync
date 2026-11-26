@@ -1,4 +1,4 @@
-import type { ServerId, SyncResult } from "../../domain/index.ts";
+import type { ManagedTier, ServerId, SyncResult } from "../../domain/index.ts";
 import { SyncReport } from "../sync-report.ts";
 import type { SyncContext } from "../sync-context.ts";
 import { Command } from "./command.ts";
@@ -22,9 +22,20 @@ export class RemoveEmoteCommand extends Command {
     state.removeManagedEmote(managed);
     if (managed.tier === "requested") state.removeRequestedEmote(managed.sevenTvEmoteId);
     await context.store.save(server, state);
-    return {
-      changes: [{ type: "deleted", name: this.name, reason: "removed" }],
-      feedback: [{ level: "info", text: `Removed ${this.name}.` }],
-    };
+    const report = new SyncReport();
+    report.change({ type: "deleted", name: this.name, reason: "removed" });
+    report.say("info", `Removed ${this.name}.`);
+    const warning = this.comesBackWarning(managed.tier);
+    if (warning) report.say("warning", warning);
+    return report.toResult();
+  }
+
+  /** Removing a mirrored emote is not remembered, so say when it will return. */
+  private comesBackWarning(tier: ManagedTier): string | null {
+    if (tier === "source") {
+      return `${this.name} is part of the Source Set and will come back on the next sync unless it is removed from the 7TV set.`;
+    }
+    if (tier === "trending") return "Trending Fill may fill this slot again on the next sync.";
+    return null;
   }
 }

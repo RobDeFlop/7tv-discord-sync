@@ -41,7 +41,7 @@ export class SyncCore {
   /** Used/free slots per quota and tier, plus problems. */
   public async status(server: ServerId): Promise<ServerStatus> {
     const synced = await this.context.load(server);
-    const quotas = await this.context.discord.getQuotas(server);
+    const quotas = await synced.quotas();
     const { state } = synced;
     return {
       writeQueue: this.context.discord.queueProgress(server),
