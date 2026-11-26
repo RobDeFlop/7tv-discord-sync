@@ -10,6 +10,7 @@ import type {
   ServerStateSnapshot,
   SevenTvEmoteId,
   SevenTvUserId,
+  TrendingPeriod,
   TrendingSettings,
 } from "./types.ts";
 
@@ -135,6 +136,11 @@ export class ServerState {
 
   public unlinkUser(): void {
     this.linkedUser = null;
+  }
+
+  /** Turn Trending Fill on or off; without a period the current one is kept. */
+  public setTrending(enabled: boolean, period?: TrendingPeriod): void {
+    this.trendingSettings = { enabled, period: period ?? this.trendingSettings.period };
   }
 
   public setLogChannel(channelId: string): void {
