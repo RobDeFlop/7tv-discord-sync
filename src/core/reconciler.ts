@@ -1,4 +1,4 @@
-import { DomainError, type ServerId, type SyncResult } from "../domain/index.ts";
+import { DomainError, MissingPermissionError, type ServerId, type SyncResult } from "../domain/index.ts";
 import { QuotaShrink } from "./quota-shrink.ts";
 import type { ReconcileStep } from "./reconcile-step.ts";
 import { SourceSetMirror } from "./source-set-mirror.ts";
@@ -15,6 +15,9 @@ export class Reconciler {
   }
 
   public async reconcile(server: ServerId): Promise<SyncResult> {
+    if (!(await this.context.discord.hasManageExpressions(server))) {
+      return SyncReport.single("error", new MissingPermissionError(server).toFeedback().text);
+    }
     const synced = await this.context.load(server);
     const report = new SyncReport();
     synced.state.beginProblemReview();
