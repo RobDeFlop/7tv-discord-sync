@@ -1,10 +1,34 @@
-export interface SocketLike {
-  send(data: string): void;
-  close(): void;
-  onopen: ((ev: unknown) => void) | null;
-  onmessage: ((ev: { data: unknown }) => void) | null;
-  onclose: ((ev: { code?: number }) => void) | null;
-  onerror: ((ev: unknown) => void) | null;
+/** The slice of a WebSocket the EventAPI client uses. */
+export abstract class EventSocket {
+  public onopen: ((ev: unknown) => void) | null = null;
+  public onmessage: ((ev: { data: unknown }) => void) | null = null;
+  public onclose: ((ev: { code?: number }) => void) | null = null;
+  public onerror: ((ev: unknown) => void) | null = null;
+
+  public abstract send(data: string): void;
+  public abstract close(): void;
+}
+
+/** EventSocket over the global WebSocket. */
+export class WebSocketEventSocket extends EventSocket {
+  private readonly socket: WebSocket;
+
+  public constructor(url: string) {
+    super();
+    this.socket = new WebSocket(url);
+    this.socket.onopen = (ev) => this.onopen?.(ev);
+    this.socket.onmessage = (ev) => this.onmessage?.({ data: ev.data });
+    this.socket.onclose = (ev) => this.onclose?.({ code: ev.code });
+    this.socket.onerror = (ev) => this.onerror?.(ev);
+  }
+
+  public send(data: string): void {
+    this.socket.send(data);
+  }
+
+  public close(): void {
+    this.socket.close();
+  }
 }
 
 export type DispatchType = "emote_set.update" | "user.update";
@@ -22,7 +46,7 @@ export const EVENT_API_URL = "wss://events.7tv.io/v3";
 const FATAL_CLOSE = new Set([4001, 4002, 4003, 4004]);
 
 export interface EventApiOptions {
-  createSocket: (url: string) => SocketLike;
+  createSocket: (url: string) => EventSocket;
   onDispatch: (d: Dispatch) => void;
   url?: string;
   /** Delay before reconnect attempt n (0-based). Injectable for tests. */
@@ -34,7 +58,7 @@ export interface EventApiOptions {
  * after reconnects. Any dispatch is only a "dirty" signal; callers re-fetch via REST.
  */
 export class EventApiClient {
-  private socket: SocketLike | null = null;
+  private socket: EventSocket | null = null;
   private open = false;
   private running = false;
   private attempt = 0;
@@ -42,15 +66,15 @@ export class EventApiClient {
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly subs = new Map<string, { type: DispatchType; id: string }>();
 
-  constructor(private readonly opts: EventApiOptions) {}
+  public constructor(private readonly opts: EventApiOptions) {}
 
-  start(): void {
+  public start(): void {
     if (this.running) return;
     this.running = true;
     this.connect();
   }
 
-  stop(): void {
+  public stop(): void {
     this.running = false;
     if (this.timer) clearTimeout(this.timer);
     if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
@@ -61,7 +85,7 @@ export class EventApiClient {
     s?.close();
   }
 
-  watch(type: DispatchType, id: string): void {
+  public watch(type: DispatchType, id: string): void {
     const key = `${type}:${id}`;
     if (this.subs.has(key)) return;
     this.subs.set(key, { type, id });
@@ -80,7 +104,7 @@ export class EventApiClient {
     socket.onerror = () => {};
   }
 
-  private onMessage(socket: SocketLike, raw: unknown): void {
+  private onMessage(socket: EventSocket, raw: unknown): void {
     if (socket !== this.socket) return;
     let msg: { op: number; d?: any };
     try {
@@ -132,7 +156,7 @@ export class EventApiClient {
     (this.heartbeatTimer as { unref?: () => void }).unref?.();
   }
 
-  private onClose(socket: SocketLike, code?: number): void {
+  private onClose(socket: EventSocket, code?: number): void {
     if (socket !== this.socket) return;
     this.socket = null;
     this.open = false;

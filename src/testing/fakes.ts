@@ -13,6 +13,7 @@ import {
   type SevenTvUserId,
   type TrendingPeriod,
 } from "../domain/index.ts";
+import { ImagePipeline } from "../image/pipeline.ts";
 import {
   DiscordPort,
   SevenTvPort,
@@ -212,5 +213,19 @@ export class FakeStore extends StorePort {
 
   public async remove(server: ServerId): Promise<void> {
     this.snapshots.delete(server);
+  }
+}
+
+/** An ImagePipeline that records its inputs and passes them through, or always fails with `failure`. */
+export class FakeImagePipeline extends ImagePipeline {
+  public readonly processed: { bytes: Uint8Array; animated: boolean }[] = [];
+
+  public constructor(private readonly failure?: Extract<ImageResult, { ok: false }>) {
+    super();
+  }
+
+  public override async prepare(bytes: Uint8Array, animated = false): Promise<ImageResult> {
+    this.processed.push({ bytes, animated });
+    return this.failure ?? { ok: true, image: { bytes, animated } };
   }
 }
