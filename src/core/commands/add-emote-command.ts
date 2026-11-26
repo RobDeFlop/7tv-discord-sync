@@ -5,6 +5,7 @@ import {
   EmoteNamer,
   QuotaFullError,
   ServerQuotas,
+  type DiscordEmojiId,
   type EmojiImage,
   type ManagedEmote,
   type ServerId,
@@ -24,7 +25,7 @@ export type PreparedEmoteAdd = {
   defaultName: string;
 } & (
   | { intent: "seven-tv-upload"; uploadImage: EmojiImage }
-  | { intent: "promotion-only" }
+  | { intent: "promotion-only"; discordEmojiId: DiscordEmojiId }
 );
 
 /** Add a 7TV emote as a Requested Emote. */
@@ -37,7 +38,9 @@ export class AddEmoteCommand extends Command {
       this.source = source;
     } else {
       const prepared = { emote: { ...source.emote }, defaultName: source.defaultName };
-      this.source = source.intent === "promotion-only" ? { ...prepared, intent: source.intent } : {
+      this.source = source.intent === "promotion-only" ? {
+        ...prepared, intent: source.intent, discordEmojiId: source.discordEmojiId,
+      } : {
         ...prepared,
         intent: source.intent,
         uploadImage: { animated: source.uploadImage.animated, bytes: new Uint8Array(source.uploadImage.bytes) },
@@ -51,8 +54,11 @@ export class AddEmoteCommand extends Command {
     const synced = await context.load(server);
     try {
       const existing = synced.state.findManaged(emote.id);
+      if (typeof source !== "string" && source.intent === "promotion-only") {
+        if (!existing || existing.discordEmojiId !== source.discordEmojiId) throw new EmoteAddPromotionUnavailableError();
+        return await this.promote(synced, emote, existing);
+      }
       if (existing) return await this.promote(synced, emote, existing);
-      if (typeof source !== "string" && source.intent === "promotion-only") throw new EmoteAddPromotionUnavailableError();
       return await this.addNew(context, synced, emote, source);
     } finally {
       // Persist whatever was applied, even when a write failed half-way.
@@ -71,11 +77,6 @@ export class AddEmoteCommand extends Command {
       if (!this.name && emoji.name !== this.source.defaultName) throw EmoteAddNameConflictError.changed();
     }
 
-    const promoted = existing.tier !== "requested";
-    if (promoted) {
-      existing.promoteTo("requested");
-      state.addRequestedEmote({ sevenTvEmoteId: emote.id, requestedName: this.name });
-    }
     let name = emoji.name;
     if (this.name && wanted) {
       if (wanted.name !== emoji.name) {
@@ -89,8 +90,11 @@ export class AddEmoteCommand extends Command {
         report.say("warning", collision.text);
       }
     }
-    if (promoted) report.say("info", `${name} is now a Requested Emote.`);
-    else if (report.toResult().feedback.length === 0) report.say("info", `${name} is already on this Server.`);
+    if (existing.tier !== "requested") {
+      existing.promoteTo("requested");
+      state.addRequestedEmote({ sevenTvEmoteId: emote.id, requestedName: this.name });
+      report.say("info", `${name} is now a Requested Emote.`);
+    } else if (report.toResult().feedback.length === 0) report.say("info", `${name} is already on this Server.`);
     return report.toResult();
   }
 

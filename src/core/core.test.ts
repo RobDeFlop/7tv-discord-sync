@@ -56,7 +56,7 @@ test("AddEmoteCommand snapshots a prepared emote and its image bytes at construc
 
   const [emoji] = discord.emojis(SERVER);
   expect(emoji?.name).toBe("Displayed");
-  expect(discord.images.get(emoji!.id)).toEqual({ bytes: new Uint8Array([1, 2, 3]), animated: false });
+  expect(discord.emojiImageSnapshot(emoji!.id)).toEqual({ bytes: new Uint8Array([1, 2, 3]), animated: false });
   expect((await store.load(SERVER)).requestedEmotes).toEqual([{ sevenTvEmoteId: "e1", requestedName: "Displayed" }]);
 });
 

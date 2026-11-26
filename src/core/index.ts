@@ -56,7 +56,7 @@ export class SyncCore {
         if (previewImage) return {
           originalName: emote.name,
           previewImage,
-          prepared: { emote, defaultName: existing.name, intent: "promotion-only" },
+          prepared: { emote, defaultName: existing.name, intent: "promotion-only", discordEmojiId: existing.id },
         };
       }
       if (result.reason === "too-large") return { originalName: emote.name, previewImage: result.previewImage, importFailure: result.reason };
