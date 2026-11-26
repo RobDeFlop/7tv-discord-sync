@@ -42,12 +42,13 @@ test("AddEmoteCommand snapshots a prepared emote and its image bytes at construc
   const bytes = Buffer.from([1, 2, 3]);
   const prepared = {
     emote: { id: "e1", name: "Original", animated: false },
-    image: { bytes, animated: false },
+    intent: "seven-tv-upload" as const,
+    uploadImage: { bytes, animated: false },
     defaultName: "Displayed",
   };
   const command = new AddEmoteCommand(prepared);
   bytes.fill(0);
-  prepared.image.animated = true;
+  prepared.uploadImage.animated = true;
   prepared.emote.id = "different";
   prepared.defaultName = "Different";
 

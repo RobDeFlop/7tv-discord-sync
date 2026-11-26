@@ -5,7 +5,6 @@ import {
   type FeedbackMessage,
   type ServerId,
   type ServerStatus,
-  type SevenTvEmote,
   type SyncResult,
   type Tier,
   type TierUsage,
@@ -22,8 +21,10 @@ import type { SyncedServer } from "./synced-server.ts";
 export * from "./commands/index.ts";
 
 type EmoteAddPreparation =
-  | PreparedEmoteAdd
-  | { emote: SevenTvEmote; image: EmojiImage; importFailure: "too-large" }
+  | ({ originalName: string; previewImage: EmojiImage } & (
+    | { prepared: PreparedEmoteAdd }
+    | { importFailure: "too-large" }
+  ))
   | { feedback: FeedbackMessage };
 
 /** The sync core's public interface. */
@@ -51,17 +52,28 @@ export class SyncCore {
     });
     if (!result.ok) {
       if (existing) {
-        const image = await this.context.discord.downloadEmojiImage(server, existing);
-        if (image) return { emote, image, defaultName: existing.name };
+        const previewImage = await this.context.discord.downloadEmojiImage(server, existing);
+        if (previewImage) return {
+          originalName: emote.name,
+          previewImage,
+          prepared: { emote, defaultName: existing.name, intent: "promotion-only" },
+        };
       }
-      if (result.reason === "too-large") return { emote, image: result.previewImage, importFailure: result.reason };
+      if (result.reason === "too-large") return { originalName: emote.name, previewImage: result.previewImage, importFailure: result.reason };
       return { feedback: { level: "error", text: `Could not preview this emote. ${new ImageFailure(emote, result.reason).text}` } };
     }
 
-    if (existing) return { emote, image: result.image, defaultName: existing.name };
-    const plan = await this.context.allocator.plan(synced, ServerQuotas.quotaOf(emote.animated), "requested");
-    const { name } = this.context.allocator.placementName(synced, emote.name, plan.ok ? plan.displace : null);
-    return { emote, image: result.image, defaultName: name };
+    let defaultName = existing?.name;
+    if (defaultName === undefined) {
+      const plan = await this.context.allocator.plan(synced, ServerQuotas.quotaOf(emote.animated), "requested");
+      defaultName = this.context.allocator.placementName(synced, emote.name, plan.ok ? plan.displace : null).name;
+    }
+    const uploadImage = result.image;
+    return {
+      originalName: emote.name,
+      previewImage: { animated: uploadImage.animated, bytes: new Uint8Array(uploadImage.bytes) },
+      prepared: { emote, defaultName, intent: "seven-tv-upload", uploadImage },
+    };
   }
 
   /** Apply an admin command to a Server. Domain errors come back as feedback. */

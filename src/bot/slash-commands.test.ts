@@ -249,6 +249,88 @@ describe("/emote add preview", () => {
     expect((await store.load(S)).findManaged("e1")?.tier).toBe("requested");
   });
 
+  test.each([
+    ["unavailable", { kind: "add" }, false],
+    ["oversized", { kind: "submit", name: "Poggers" }, true],
+  ] as const)("a Discord preview fallback for a 7TV image marked %s cannot be imported", async (failure, action, fullQuota) => {
+    const { discord, sevenTv, store, run, events, openPreview, interact } = setup();
+    if (fullQuota) {
+      sevenTv.addEmote({ id: "e2", name: "Other", animated: false });
+      sevenTv.setEmotes("setA", "A", ["e1", "e2"]);
+    }
+    await run("set link", { link: "https://7tv.app/users/u1" });
+    await events.idle();
+    const mirrored = discord.emojis(S).find((emoji) => emoji.name === "Pog")!;
+    const fallback = { bytes: new Uint8Array([91, 2, 7]), animated: false };
+    discord.images.set(mirrored.id, fallback);
+    if (failure === "unavailable") sevenTv.disableDownload("e1");
+    else sevenTv.setImageSize("e1", MAX_EMOJI_BYTES + 1);
+
+    const preview = await openPreview();
+    expect(preview.image).toEqual(fallback);
+    if (action.kind === "submit") expect((await interact(preview.id, { kind: "name" })).formValue).toBe("Pog");
+
+    discord.removeEmojiByHand(S, mirrored.id);
+    if (fullQuota) {
+      for (let i = 0; i < 49; i++) discord.seedEmoji(S, { name: `Reserved_${i}`, animated: false });
+      expect(discord.emojis(S)).toHaveLength(50);
+    }
+    const remaining = discord.emojis(S);
+    const create = spyOn(discord, "createEmoji");
+    const remove = spyOn(discord, "deleteEmoji");
+    const quotaLookups = discord.quotaLookups;
+    const downloads = sevenTv.downloadCount("e1");
+
+    const reply = await interact(preview.id, action);
+    expect(reply.text).toContain("No emote was added. Run `/emote add` again");
+    expect(create).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    expect(discord.emojis(S)).toEqual(remaining);
+    expect(discord.quotaLookups).toBe(quotaLookups);
+    expect(sevenTv.downloadCount("e1")).toBe(downloads);
+    expect((await store.load(S)).requestedEmotes).toEqual([]);
+  });
+
+  test("a custom name promotes and renames the same Discord emoji when using a fallback preview", async () => {
+    const { discord, sevenTv, store, run, events, openPreview, interact } = setup();
+    await run("set link", { link: "https://7tv.app/users/u1" });
+    await events.idle();
+    const mirrored = discord.emojis(S)[0]!;
+    sevenTv.setImageSize("e1", MAX_EMOJI_BYTES + 1);
+
+    const preview = await openPreview();
+    expect((await interact(preview.id, { kind: "name" })).formValue).toBe("Pog");
+    const create = spyOn(discord, "createEmoji");
+    expect((await interact(preview.id, { kind: "submit", name: "Poggers" })).text).toContain("Poggers is now a Requested Emote");
+    expect(create).not.toHaveBeenCalled();
+    expect(discord.emojis(S)).toEqual([{ ...mirrored, name: "Poggers" }]);
+    expect((await store.load(S)).requestedEmotes).toEqual([{ sevenTvEmoteId: "e1", requestedName: "Poggers" }]);
+  });
+
+  test("a prepared 7TV upload still works under the displayed name after the mirrored emoji is deleted", async () => {
+    const { discord, sevenTv, store, run, events, openPreview, interact } = setup();
+    await run("set link", { link: "https://7tv.app/users/u1" });
+    await events.idle();
+    const mirrored = discord.emojis(S)[0]!;
+    await discord.renameEmoji(S, mirrored.id, "MirrorName");
+    sevenTv.setImageSize("e1", 42);
+
+    const preview = await openPreview();
+    expect(preview.defaultName).toBe("MirrorName");
+    expect(preview.image.bytes.byteLength).toBe(42);
+    discord.removeEmojiByHand(S, mirrored.id);
+    sevenTv.disableDownload("e1");
+    const downloads = sevenTv.downloadCount("e1");
+
+    expect((await interact(preview.id, { kind: "add" })).text).toContain("Added MirrorName");
+    const [created] = discord.emojis(S);
+    expect(created).toEqual({ id: expect.any(String), name: "MirrorName", animated: false });
+    expect(created!.id).not.toBe(mirrored.id);
+    expect(discord.images.get(created!.id)).toEqual(preview.image);
+    expect(sevenTv.downloadCount("e1")).toBe(downloads);
+    expect((await store.load(S)).requestedEmotes).toEqual([{ sevenTvEmoteId: "e1", requestedName: "MirrorName" }]);
+  });
+
   test("submitting a taken name doesn't rename or promote a mirrored emote", async () => {
     const { discord, store, run, events, openPreview, interact } = setup();
     await run("set link", { link: "https://7tv.app/users/u1" });

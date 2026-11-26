@@ -1,6 +1,7 @@
 import {
   DisplacementError,
   EmoteAddNameConflictError,
+  EmoteAddPromotionUnavailableError,
   EmoteNamer,
   QuotaFullError,
   ServerQuotas,
@@ -18,11 +19,13 @@ import type { SyncContext } from "../sync-context.ts";
 import type { SyncedServer } from "../synced-server.ts";
 import { Command } from "./command.ts";
 
-export interface PreparedEmoteAdd {
+export type PreparedEmoteAdd = {
   emote: SevenTvEmote;
-  image: EmojiImage;
   defaultName: string;
-}
+} & (
+  | { intent: "seven-tv-upload"; uploadImage: EmojiImage }
+  | { intent: "promotion-only" }
+);
 
 /** Add a 7TV emote as a Requested Emote. */
 export class AddEmoteCommand extends Command {
@@ -30,19 +33,27 @@ export class AddEmoteCommand extends Command {
 
   public constructor(source: string | PreparedEmoteAdd, private readonly name?: string) {
     super();
-    this.source = typeof source === "string" ? source : {
-      emote: { ...source.emote },
-      image: { animated: source.image.animated, bytes: new Uint8Array(source.image.bytes) },
-      defaultName: source.defaultName,
-    };
+    if (typeof source === "string") {
+      this.source = source;
+    } else {
+      const prepared = { emote: { ...source.emote }, defaultName: source.defaultName };
+      this.source = source.intent === "promotion-only" ? { ...prepared, intent: source.intent } : {
+        ...prepared,
+        intent: source.intent,
+        uploadImage: { animated: source.uploadImage.animated, bytes: new Uint8Array(source.uploadImage.bytes) },
+      };
+    }
   }
 
   public async execute(server: ServerId, context: SyncContext): Promise<SyncResult> {
-    const emote = typeof this.source === "string" ? await context.sevenTv.resolveEmoteLink(this.source) : this.source.emote;
+    const { source } = this;
+    const emote = typeof source === "string" ? await context.sevenTv.resolveEmoteLink(source) : source.emote;
     const synced = await context.load(server);
     try {
       const existing = synced.state.findManaged(emote.id);
-      return existing ? await this.promote(synced, emote, existing) : await this.addNew(context, synced, emote);
+      if (existing) return await this.promote(synced, emote, existing);
+      if (typeof source !== "string" && source.intent === "promotion-only") throw new EmoteAddPromotionUnavailableError();
+      return await this.addNew(context, synced, emote, source);
     } finally {
       // Persist whatever was applied, even when a write failed half-way.
       await context.store.save(server, synced.state);
@@ -83,12 +94,17 @@ export class AddEmoteCommand extends Command {
     return report.toResult();
   }
 
-  private async addNew(context: SyncContext, synced: SyncedServer, emote: SevenTvEmote): Promise<SyncResult> {
+  private async addNew(
+    context: SyncContext,
+    synced: SyncedServer,
+    emote: SevenTvEmote,
+    source: string | Extract<PreparedEmoteAdd, { intent: "seven-tv-upload" }>,
+  ): Promise<SyncResult> {
     const { state } = synced;
     const quota = ServerQuotas.quotaOf(emote.animated);
-    const result = typeof this.source === "string"
+    const result = typeof source === "string"
       ? await context.sevenTv.downloadImage(emote.id)
-      : { ok: true as const, image: this.source.image };
+      : { ok: true as const, image: source.uploadImage };
     if (!result.ok) {
       const failure = new ImageFailure(emote, result.reason);
       state.recordProblem(failure.toProblem());
@@ -98,9 +114,9 @@ export class AddEmoteCommand extends Command {
     const plan = await context.allocator.plan(synced, quota, "requested");
     if (!plan.ok) throw new QuotaFullError(quota, emote.name);
 
-    const requestedName = this.name ?? (typeof this.source === "string" ? undefined : this.source.defaultName);
+    const requestedName = this.name ?? (typeof source === "string" ? undefined : source.defaultName);
     const wanted = requestedName ?? emote.name;
-    if (typeof this.source !== "string" && context.allocator.placementName(synced, wanted, plan.displace).suffixed) {
+    if (typeof source !== "string" && context.allocator.placementName(synced, wanted, plan.displace).suffixed) {
       throw EmoteAddNameConflictError.taken(wanted);
     }
 

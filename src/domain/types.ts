@@ -93,7 +93,7 @@ export type EmoteAddNameConflictReason = "emote-name-taken" | "emote-name-change
 export interface FeedbackMessage {
   level: "info" | "warning" | "error";
   text: string;
-  reason?: EmoteAddNameConflictReason;
+  reason?: EmoteAddNameConflictReason | "emote-promotion-unavailable";
 }
 
 /** What a sync did to a Server's emojis. */

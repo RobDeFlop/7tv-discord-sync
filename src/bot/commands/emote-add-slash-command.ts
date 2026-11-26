@@ -27,12 +27,11 @@ export class EmoteAddSlashCommand extends SlashCommand {
   private readonly pending = new Map<string, PendingEmoteAdd>();
 
   protected async run(serverId: ServerId, request: SlashRequest): Promise<SlashReply> {
-    const prepared = await this.core.prepareEmoteAdd(serverId, this.requiredString(request, "link"));
-    if ("feedback" in prepared) return FeedbackRouter.format([prepared.feedback]);
+    const preparation = await this.core.prepareEmoteAdd(serverId, this.requiredString(request, "link"));
+    if ("feedback" in preparation) return FeedbackRouter.format([preparation.feedback]);
 
-    const originalName = prepared.emote.name;
-    const image = { animated: prepared.image.animated, bytes: new Uint8Array(prepared.image.bytes) };
-    if ("importFailure" in prepared) {
+    const { originalName, previewImage: image } = preparation;
+    if ("importFailure" in preparation) {
       return {
         originalName,
         image,
@@ -44,6 +43,7 @@ export class EmoteAddSlashCommand extends SlashCommand {
     const expiresAt = Date.now() + EmoteAddSlashCommand.PREVIEW_TTL_MS;
     const timer = setTimeout(() => this.pending.delete(id), EmoteAddSlashCommand.PREVIEW_TTL_MS);
     timer.unref();
+    const { prepared } = preparation;
     this.pending.set(id, { serverId, userId: request.userId, prepared, expiresAt, timer });
     return { id, originalName, defaultName: prepared.defaultName, image };
   }
@@ -76,7 +76,8 @@ export class EmoteAddSlashCommand extends SlashCommand {
       );
       reply = FeedbackRouter.format(feedback.map((message) => {
         const nextStep = message.reason === "emote-name-taken" ? "and choose another name."
-          : message.reason === "emote-name-changed" ? "to review the name." : null;
+          : message.reason === "emote-name-changed" ? "to review the name."
+          : message.reason === "emote-promotion-unavailable" ? "to start over." : null;
         return nextStep ? { ...message, text: `${message.text} Run \`/emote add\` again ${nextStep}` } : message;
       }));
     } catch (error) {

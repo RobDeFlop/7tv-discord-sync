@@ -92,6 +92,8 @@ A typical first setup:
 
 In the private emote preview, choose **Add** to use the displayed name, **Choose name** to edit the original 7TV name and add on submission, or **Cancel** to leave without adding anything. Names must be 2–32 characters and use only letters (A–Z), numbers, and underscores. The suggested name may already include a numeric suffix. If your custom name is taken, or the displayed name becomes taken before confirmation, the bot rejects it rather than adding a suffix. If the preview expires, run `/emote add` again.
 
+When an oversized image cannot be imported, the private preview explains Discord's 256 KB limit without adding a problem to `/status`.
+
 ### How slots are shared
 
 Discord limits static and animated emojis separately (50, 100, 150 or 250 each, depending on boost level). When slots run out, they go in this order:
@@ -101,7 +103,7 @@ Discord limits static and animated emojis separately (50, 100, 150 or 250 each, 
 3. The mirrored 7TV set
 4. Trending emotes
 
-An emote higher in the list pushes out one lower in the list. Animated emotes are converted and shrunk to fit Discord's 256 KB limit; an emote that can't be shrunk enough is skipped and listed in `/status`.
+An emote higher in the list pushes out one lower in the list. Animated emotes are converted and shrunk to fit Discord's 256 KB limit. During sync, an emote that can't be shrunk enough is skipped and listed in `/status`.
 
 ### Automatic syncs
 

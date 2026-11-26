@@ -72,6 +72,17 @@ export class EmoteAddNameConflictError extends DomainError {
   }
 }
 
+/** A preview that could only promote a Managed Emote can no longer do so. */
+export class EmoteAddPromotionUnavailableError extends DomainError {
+  public constructor() {
+    super("The Discord emoji shown in the preview is no longer managed by the bot. No emote was added.");
+  }
+
+  public toFeedback(): FeedbackMessage {
+    return { level: "error", text: this.message, reason: "emote-promotion-unavailable" };
+  }
+}
+
 /** No free slot in a quota and nothing of lower Precedence to displace. */
 export class QuotaFullError extends DomainError {
   public constructor(
