@@ -1,3 +1,7 @@
+import { RateLimitError } from "../../ports/discord-port.ts";
+
+export { RateLimitError };
+
 export abstract class Clock {
   public abstract now(): number;
   public abstract sleep(ms: number): Promise<void>;
@@ -10,13 +14,6 @@ export class SystemClock extends Clock {
 
   public sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-}
-
-/** A write hit Discord's rate limit; the queue waits and retries. */
-export class RateLimitError extends Error {
-  public constructor(public readonly retryAfterMs: number) {
-    super(`Rate limited, retry after ${retryAfterMs}ms`);
   }
 }
 

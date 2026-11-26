@@ -1,4 +1,5 @@
-import { DomainError, MissingPermissionError, type ServerId, type SyncResult } from "../domain/index.ts";
+import { DisplacementError, DomainError, MissingPermissionError, type ServerId, type SyncResult } from "../domain/index.ts";
+import { RateLimitError } from "../ports/discord-port.ts";
 import { QuotaShrink } from "./quota-shrink.ts";
 import type { ReconcileStep } from "./reconcile-step.ts";
 import { SourceSetMirror } from "./source-set-mirror.ts";
@@ -26,6 +27,7 @@ export class Reconciler {
       synced.state.endProblemReview(); // only a full run knows which problems are gone
     } catch (err) {
       // Stop at the first domain error (e.g. missing permission) but keep the state of what was done.
+      if (err instanceof DisplacementError && err.cause instanceof RateLimitError) throw err.cause;
       if (!(err instanceof DomainError)) throw err;
       report.say(err.toFeedback().level, err.toFeedback().text);
     } finally {

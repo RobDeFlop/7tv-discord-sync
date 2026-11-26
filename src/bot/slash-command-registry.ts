@@ -44,7 +44,7 @@ export class SlashCommandRegistry {
       new EmoteRemoveSlashCommand(core, lock),
       new SetLinkSlashCommand(core, lock, events),
       new SetUnlinkSlashCommand(core, lock),
-      new TrendingSlashCommand(core, lock),
+      new TrendingSlashCommand(core, lock, events),
       new SyncSlashCommand(core, lock, events),
       new StatusSlashCommand(core, lock),
       new ConfigLogChannelSlashCommand(core, lock),

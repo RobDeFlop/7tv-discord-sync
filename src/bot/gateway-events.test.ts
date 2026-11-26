@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, jest, test } from "bun:test";
+import { RateLimitError } from "../adapters/discord/write-queue.ts";
 import { ConfigureLogChannelCommand, LinkSourceSetCommand, SyncCore } from "../core/index.ts";
 import type { ServerId } from "../domain/index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
@@ -57,6 +58,53 @@ describe("server events", () => {
     discord.setBoostLevel(A, 1);
     await events.boostChanged(A);
     expect((await core.status(A)).quotas.static.free).toBe(100);
+  });
+
+  test("a rate-limited sync pauses, coalesces events and resumes without another event", async () => {
+    jest.useFakeTimers();
+    try {
+      const { discord, sevenTv, core, events, link, log, names } = setup();
+      await core.apply(A, new ConfigureLogChannelCommand("log"));
+      await link(A);
+      sevenTv.addEmote({ id: "e2", name: "Kappa", animated: false });
+      sevenTv.setEmotes("setA", "A", ["e1", "e2"]);
+      discord.failCreatesAfter(A, 0, new RateLimitError(2_000));
+      await events.emojiChanged(A);
+      expect(log.sent[0]?.text).toMatch(/paused.*resume/i);
+      await events.boostChanged(A);
+      jest.advanceTimersByTime(2_000);
+      await events.idle();
+      expect(log.sent).toHaveLength(2); // the first retry was also rate limited
+      discord.allowCreates(A);
+      await events.emojiChanged(A);
+      jest.advanceTimersByTime(3_999);
+      await events.idle();
+      expect(names(A)).toEqual(["Pog"]);
+      jest.advanceTimersByTime(1);
+      await events.idle();
+      expect(names(A).sort()).toEqual(["Kappa", "Pog"]);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test("leaving a Server cancels its paused sync", async () => {
+    jest.useFakeTimers();
+    try {
+      const { discord, core, store, events, link } = setup();
+      await link(A);
+      discord.removeEmojiByHand(A, discord.emojis(A)[0]!.id);
+      discord.failCreatesAfter(A, 0, new RateLimitError(1_000));
+      await events.emojiChanged(A);
+      await events.serverLeft(A);
+      discord.allowCreates(A);
+      jest.advanceTimersByTime(10_000);
+      await events.idle();
+      expect(await store.listServers()).not.toContain(A);
+      expect((await core.status(A)).linkedUserId).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test("an unexpected failure is contained, not thrown to the gateway", async () => {
