@@ -19,11 +19,9 @@ export class RemoveEmoteCommand extends Command {
     if (!managed) {
       return SyncReport.single("error", `${this.name} was not created by this bot, so it cannot be removed here.`);
     }
-    await synced.deleteEmoji(emoji);
-    state.removeManagedEmote(managed);
-    await context.store.save(server, state);
     const report = new SyncReport();
-    report.change({ type: "deleted", name: this.name, reason: "removed" });
+    await synced.removeManaged(managed, report, "removed");
+    await context.store.save(server, state);
     report.say("info", `Removed ${this.name}.`);
     const warning = await this.comesBackWarning(managed, state.linkedUserId, context.sevenTv);
     if (warning) report.say("warning", warning);

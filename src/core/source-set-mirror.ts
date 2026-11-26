@@ -41,10 +41,7 @@ export class SourceSetMirror extends ReconcileStep {
   private async removeDeparted(synced: SyncedServer, report: SyncReport, wantedIds: Set<string>): Promise<void> {
     for (const managed of synced.state.managedOfTier("source")) {
       if (wantedIds.has(managed.sevenTvEmoteId)) continue;
-      const emoji = synced.emojiOf(managed);
-      await synced.deleteEmoji(emoji);
-      synced.state.removeManagedEmote(managed);
-      report.change({ type: "deleted", name: emoji.name, reason: "removed" });
+      await synced.removeManaged(managed, report, "removed");
     }
   }
 

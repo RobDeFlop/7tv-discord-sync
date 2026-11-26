@@ -24,10 +24,7 @@ export class QuotaShrink extends ReconcileStep {
     if (excess <= 0) return;
     const { state } = synced;
     for (const managed of state.lowestPrecedence(quota, excess)) {
-      const emoji = synced.emojiOf(managed);
-      await synced.deleteEmoji(emoji);
-      state.removeManagedEmote(managed);
-      report.change({ type: "deleted", name: emoji.name, reason: "boost-lost" });
+      const emoji = await synced.removeManaged(managed, report, "boost-lost");
       report.say(
         "warning",
         `${emoji.name} (${managed.tier}) was removed because the Server's ${quota} emoji limit dropped with its boost level.`,

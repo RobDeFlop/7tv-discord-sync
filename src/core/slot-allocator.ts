@@ -39,10 +39,7 @@ export class SlotAllocator {
   ): Promise<Placement> {
     const { state } = synced;
     if (plan.displace) {
-      const victim = synced.emojiOf(plan.displace);
-      await synced.deleteEmoji(victim);
-      state.removeManagedEmote(plan.displace);
-      report.change({ type: "deleted", name: victim.name, reason: "displaced" });
+      const victim = await synced.removeManaged(plan.displace, report, "displaced");
       report.say("warning", `${victim.name} (${plan.displace.tier}) was removed to make room for ${emote.name}.`);
     }
     const { name, suffixed } = EmoteNamer.unique(wantedName, synced.emojiNames());
