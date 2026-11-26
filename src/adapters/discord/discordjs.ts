@@ -1,5 +1,11 @@
-import { PermissionFlagsBits, type Client, type Guild } from "discord.js";
-import type { DiscordEmoji, ServerId } from "../../domain/index.ts";
+import {
+  Client,
+  GatewayIntentBits,
+  PermissionFlagsBits,
+  RateLimitError as RestRateLimitError,
+  type Guild,
+} from "discord.js";
+import type { DiscordEmoji, EmojiImage, ServerId } from "../../domain/index.ts";
 import { DiscordAdapter } from "./discord-adapter.ts";
 import { GuildGateway, GuildProvider } from "./guild-gateway.ts";
 import { RateLimitError, WriteQueue } from "./write-queue.ts";
@@ -24,9 +30,10 @@ export class DiscordJsGuild extends GuildGateway {
     return [...all.values()].map((e) => DiscordJsGuild.toEmoji(e));
   }
 
-  public createEmoji(name: string, bytes: Uint8Array): Promise<DiscordEmoji> {
+  public createEmoji(name: string, image: EmojiImage): Promise<DiscordEmoji> {
+    // A data URI carries the real mime type; discord.js would label a raw Buffer image/jpg.
     return DiscordJsGuild.mapRateLimit(async () =>
-      DiscordJsGuild.toEmoji(await this.guild.emojis.create({ attachment: Buffer.from(bytes), name })),
+      DiscordJsGuild.toEmoji(await this.guild.emojis.create({ attachment: DiscordJsGuild.toDataUri(image), name })),
     );
   }
 
@@ -38,6 +45,11 @@ export class DiscordJsGuild extends GuildGateway {
     await DiscordJsGuild.mapRateLimit(() => this.guild.emojis.delete(id));
   }
 
+  private static toDataUri(image: EmojiImage): string {
+    const mime = image.animated ? "image/gif" : "image/png";
+    return `data:${mime};base64,${Buffer.from(image.bytes).toString("base64")}`;
+  }
+
   private static toEmoji(e: { id: string; name: string | null; animated: boolean | null }): DiscordEmoji {
     return { id: e.id, name: e.name ?? "", animated: e.animated ?? false };
   }
@@ -46,10 +58,9 @@ export class DiscordJsGuild extends GuildGateway {
     try {
       return await call();
     } catch (e) {
-      const err = e as { status?: number; retryAfter?: number; timeToReset?: number };
-      if (err?.status === 429 || err?.timeToReset !== undefined) {
-        throw new RateLimitError(err.timeToReset ?? (err.retryAfter ?? 1) * 1000);
-      }
+      if (e instanceof RestRateLimitError) throw new RateLimitError(e.timeToReset);
+      const err = e as { status?: number; retryAfter?: number };
+      if (err?.status === 429) throw new RateLimitError((err.retryAfter ?? 1) * 1000);
       throw e;
     }
   }
@@ -69,5 +80,16 @@ class DiscordJsGuildProvider extends GuildProvider {
 export class DiscordJsAdapter extends DiscordAdapter {
   public constructor(client: Client, queue: WriteQueue = new WriteQueue()) {
     super(new DiscordJsGuildProvider(client), queue);
+  }
+
+  /**
+   * The Client the bot needs: Guilds + GuildExpressions for emoji events, and emoji
+   * route rate limits rejected (not slept on) so the write queue sees them and can report progress.
+   */
+  public static createClient(): Client {
+    return new Client({
+      intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildExpressions],
+      rest: { rejectOnRateLimit: (info) => info.route.includes("/emojis") },
+    });
   }
 }

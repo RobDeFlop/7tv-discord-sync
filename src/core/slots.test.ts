@@ -237,3 +237,25 @@ describe("remove", () => {
     expect(errors(r).length).toBe(1);
   });
 });
+
+describe("static and animated pools", () => {
+  test("a full static pool does not block animated emotes and status counts them apart", async () => {
+    const { discord, sevenTv, core } = setup(); // 50 static + 50 animated
+    for (let i = 0; i < 50; i++) discord.seedEmoji(S, { name: `hand${i}`, animated: false });
+    sevenTv.addEmote({ id: "a1", name: "jam", animated: true });
+    const r = await core.apply(S, new AddEmoteCommand(link("a1")));
+    expect(errors(r)).toEqual([]);
+    const st = await core.status(S);
+    expect(st.quotas.static).toMatchObject({ used: 50, free: 0 });
+    expect(st.quotas.animated).toMatchObject({ used: 1, free: 49 });
+  });
+});
+
+describe("status write queue", () => {
+  test("reports pending writes and rate-limit retry time from the Discord port", async () => {
+    const { discord, core } = setup();
+    expect((await core.status(S)).writeQueue).toEqual({ pending: 0, retryingAt: null });
+    discord.setQueueProgress(S, { pending: 3, retryingAt: 1234 });
+    expect((await core.status(S)).writeQueue).toEqual({ pending: 3, retryingAt: 1234 });
+  });
+});

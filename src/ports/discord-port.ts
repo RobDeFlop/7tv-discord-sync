@@ -1,4 +1,4 @@
-import { ServerQuotas, type DiscordEmoji, type EmojiImage, type ServerId } from "../domain/index.ts";
+import { ServerQuotas, type DiscordEmoji, type EmojiImage, type ServerId, type WriteQueueProgress } from "../domain/index.ts";
 
 export abstract class DiscordPort {
   /** The Server's current boost level (0 to 3). */
@@ -7,6 +7,11 @@ export abstract class DiscordPort {
   public abstract createEmoji(server: ServerId, emoji: { name: string; image: EmojiImage }): Promise<DiscordEmoji>;
   public abstract renameEmoji(server: ServerId, emojiId: string, name: string): Promise<void>;
   public abstract deleteEmoji(server: ServerId, emojiId: string): Promise<void>;
+
+  /** Writes still waiting for a Server; implementations with a write queue override this. */
+  public queueProgress(_server: ServerId): WriteQueueProgress {
+    return { pending: 0, retryingAt: null };
+  }
 
   /** Slot limits at the Server's boost level; the same table for every implementation. */
   public async getQuotas(server: ServerId): Promise<ServerQuotas> {
