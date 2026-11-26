@@ -27,6 +27,20 @@ export class InvalidLinkError extends DomainError {
   }
 }
 
+/** The bot lacks Manage Expressions on a Server. Thrown by the Discord port, shown to the admin by the core. */
+export class MissingPermissionError extends DomainError {
+  public constructor(public readonly server: string) {
+    super(`Missing Manage Expressions permission in server ${server}`);
+  }
+
+  public toFeedback(): FeedbackMessage {
+    return {
+      level: "error",
+      text: "I am missing the Manage Expressions permission, so I cannot add, rename or remove emojis. Grant it to my role and run /sync again.",
+    };
+  }
+}
+
 /** No free slot in a quota and nothing of lower Precedence to displace. */
 export class QuotaFullError extends DomainError {
   public constructor(

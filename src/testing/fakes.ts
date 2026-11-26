@@ -1,5 +1,6 @@
 import {
   InvalidLinkError,
+  MissingPermissionError,
   ServerState,
   type DiscordEmoji,
   type EmojiImage,
@@ -27,6 +28,7 @@ export const MAX_EMOJI_BYTES = 256 * 1024;
 interface FakeServer {
   boostLevel: number;
   emojis: DiscordEmoji[];
+  canManage: boolean;
 }
 
 export class FakeDiscord extends DiscordPort {
@@ -36,7 +38,12 @@ export class FakeDiscord extends DiscordPort {
   public readonly images = new Map<string, EmojiImage>();
 
   public addServer(id: ServerId, opts: { boostLevel?: number } = {}): void {
-    this.servers.set(id, { boostLevel: opts.boostLevel ?? 0, emojis: [] });
+    this.servers.set(id, { boostLevel: opts.boostLevel ?? 0, emojis: [], canManage: true });
+  }
+
+  /** From now on writes fail with MissingPermissionError, as without Manage Expressions. */
+  public revokeManageExpressions(id: ServerId): void {
+    this.server(id).canManage = false;
   }
 
   public setBoostLevel(id: ServerId, boostLevel: number): void {
@@ -71,7 +78,8 @@ export class FakeDiscord extends DiscordPort {
 
   public async createEmoji(id: ServerId, emoji: { name: string; image: EmojiImage }): Promise<DiscordEmoji> {
     const s = this.server(id);
-    const limit = (await this.getQuotas(id)).limit(emoji.image.animated ? "animated" : "static");
+    this.assertCanManage(id);
+    const limit =(await this.getQuotas(id)).limit(emoji.image.animated ? "animated" : "static");
     const used = s.emojis.filter((e) => e.animated === emoji.image.animated).length;
     if (used >= limit) throw new Error("Maximum number of emojis reached");
     if (!/^[A-Za-z0-9_]{2,32}$/.test(emoji.name)) throw new Error(`Invalid emoji name: ${emoji.name}`);
@@ -83,6 +91,7 @@ export class FakeDiscord extends DiscordPort {
   }
 
   public async renameEmoji(id: ServerId, emojiId: string, name: string): Promise<void> {
+    this.assertCanManage(id);
     const emoji = this.server(id).emojis.find((e) => e.id === emojiId);
     if (!emoji) throw new Error(`Unknown emoji ${emojiId}`);
     if (!/^[A-Za-z0-9_]{2,32}$/.test(name)) throw new Error(`Invalid emoji name: ${name}`);
@@ -90,7 +99,12 @@ export class FakeDiscord extends DiscordPort {
   }
 
   public async deleteEmoji(id: ServerId, emojiId: string): Promise<void> {
+    this.assertCanManage(id);
     this.removeEmojiByHand(id, emojiId);
+  }
+
+  private assertCanManage(id: ServerId): void {
+    if (!this.server(id).canManage) throw new MissingPermissionError(id);
   }
 
   private server(id: ServerId): FakeServer {
