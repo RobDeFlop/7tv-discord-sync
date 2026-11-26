@@ -133,6 +133,19 @@ describe("removing a mirrored emote", () => {
     expect(r.feedback.map((f) => f.text).join(" ")).toContain("Trending Fill");
   });
 
+  test("warns when a removed Requested Emote is still in the active Source Set", async () => {
+    const { sevenTv, core, emotes, names } = setup();
+    emotes(["r"]);
+    await core.apply(S, new AddEmoteCommand("https://7tv.app/emotes/r", "mine"));
+    sevenTv.setEmotes("setA", "Main", ["r"]);
+    await core.apply(S, new LinkSourceSetCommand(userLink));
+    const result = await core.apply(S, new RemoveEmoteCommand("mine"));
+    expect(warnings(result).map((f) => f.text).join(" ")).toContain("Source Set");
+    expect(names()).toEqual([]);
+    await core.reconcile(S);
+    expect(names()).toEqual(["RR"]);
+  });
+
   test("a Requested Emote removal needs no warning", async () => {
     const { core, emotes } = setup();
     emotes(["r"]);
