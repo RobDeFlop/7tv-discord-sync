@@ -14,8 +14,6 @@ export class SourceSetMirror extends ReconcileStep {
   public async run(synced: SyncedServer): Promise<SyncResult> {
     const { state } = synced;
     const report = new SyncReport();
-    const hadPending = state.pendingEmoteIds();
-    state.clearPending();
     if (!state.linkedUserId) return report.toResult();
 
     const user = await this.context.sevenTv.getUser(state.linkedUserId);
@@ -24,6 +22,12 @@ export class SourceSetMirror extends ReconcileStep {
       return report.toResult();
     }
     const set = user.activeSetId ? await this.context.sevenTv.getSet(user.activeSetId) : null;
+    if (user.activeSetId && !set) {
+      report.say("warning", "The active 7TV set could not be found; the Source Set was not synced.");
+      return report.toResult();
+    }
+    const hadPending = state.pendingEmoteIds();
+    state.clearPending();
     const wanted = (set?.emotes ?? []).filter((e, i, all) => all.findIndex((o) => o.id === e.id) === i);
 
     await this.removeDeparted(synced, report, new Set(wanted.map((e) => e.id)));
