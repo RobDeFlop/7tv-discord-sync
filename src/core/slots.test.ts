@@ -20,7 +20,7 @@ function setup(opts: { boostLevel?: number } = {}) {
   return { discord, sevenTv, store, core, names };
 }
 
-const errors = (r: { feedback: { level: string }[] }) => r.feedback.filter((f) => f.level === "error");
+const errors = (r: { feedback: { level: string; text: string }[] }) => r.feedback.filter((f) => f.level === "error");
 
 describe("Reserved Slots", () => {
   test("hand-added emojis become Reserved and are never touched; hand-deleted ones free their slot", async () => {
