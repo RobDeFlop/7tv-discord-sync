@@ -88,6 +88,20 @@ describe("Trending Fill and Source Set renames are no longer silent", () => {
     expect((await problems()).map((p) => p.kind)).toEqual(["too-large"]);
   });
 
+  test("an unavailable Trending Fill image stays skipped without another download", async () => {
+    const { sevenTv, discord, core, emotes, problems } = setup();
+    emotes(["a"]);
+    sevenTv.disableDownload("a");
+    sevenTv.setTrending("week", ["a"]);
+    await core.apply(S, new SetTrendingCommand(true));
+    const result = await core.reconcile(S);
+    expect(warnings(result)).toEqual([]);
+    expect(sevenTv.downloadCount("a")).toBe(1);
+    for (let i = 0; i < 50; i++) discord.seedEmoji(S, { name: `hand${i}`, animated: false });
+    await core.reconcile(S);
+    expect((await problems()).map((p) => p.kind)).toEqual(["skipped"]);
+  });
+
   test("a suffixed trending emote produces feedback and a problem", async () => {
     const { discord, sevenTv, core, emotes, names, problems } = setup();
     emotes(["a"]);

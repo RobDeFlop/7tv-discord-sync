@@ -196,6 +196,12 @@ export class FakeSevenTv extends SevenTvPort {
     this.trending.set(period, emoteIds);
   }
 
+  private readonly unavailableImages = new Set<SevenTvEmoteId>();
+
+  public disableDownload(id: SevenTvEmoteId): void {
+    this.unavailableImages.add(id);
+  }
+
   /** Make the next download of this emote report the given size. */
   public setImageSize(id: SevenTvEmoteId, bytes: number): void {
     this.imageSizes.set(id, bytes);
@@ -245,7 +251,7 @@ export class FakeSevenTv extends SevenTvPort {
   public async downloadImage(id: SevenTvEmoteId): Promise<ImageResult> {
     this.downloads.set(id, this.downloadCount(id) + 1);
     const emote = this.emotes.get(id);
-    if (!emote) return { ok: false, reason: "unavailable" };
+    if (!emote || this.unavailableImages.has(id)) return { ok: false, reason: "unavailable" };
     const size = this.imageSizes.get(id) ?? 0;
     if (size > MAX_EMOJI_BYTES) return { ok: false, reason: "too-large" };
     return { ok: true, image: { bytes: new Uint8Array(size), animated: emote.animated } };
