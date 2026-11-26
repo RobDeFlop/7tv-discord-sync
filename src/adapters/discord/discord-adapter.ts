@@ -30,7 +30,7 @@ export class DiscordAdapter extends DiscordPort {
   }
 
   public createEmoji(server: ServerId, emoji: { name: string; image: EmojiImage }): Promise<DiscordEmoji> {
-    return this.write(server, (g) => g.createEmoji(emoji.name, emoji.image.bytes));
+    return this.write(server, (g) => g.createEmoji(emoji.name, emoji.image));
   }
 
   public renameEmoji(server: ServerId, emojiId: string, name: string): Promise<void> {

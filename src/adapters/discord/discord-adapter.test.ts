@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { EmojiImage } from "../../domain/index.ts";
 import { DiscordAdapter, MissingPermissionError } from "./discord-adapter.ts";
 import { GuildGateway, GuildProvider } from "./guild-gateway.ts";
 import { RateLimitError, WriteQueue } from "./write-queue.ts";
@@ -27,11 +28,11 @@ class TestGuild extends GuildGateway {
     return [...this.emojis.values()];
   }
 
-  public async createEmoji(name: string, bytes: Uint8Array): Promise<Emoji> {
+  public async createEmoji(name: string, image: EmojiImage): Promise<Emoji> {
     this.calls.push(`create ${name}`);
     const f = this.failures.shift();
     if (f) throw f;
-    const e = { id: `e${this.n++}`, name, animated: bytes[0] === 1 };
+    const e = { id: `e${this.n++}`, name, animated: image.animated };
     this.emojis.set(e.id, e);
     return e;
   }
@@ -86,7 +87,7 @@ describe("DiscordAdapter", () => {
 
   test("lists emojis", async () => {
     const g = fakeGuild();
-    await g.guild.createEmoji("wave", new Uint8Array([1]));
+    await g.guild.createEmoji("wave", img(true));
     const { adapter } = setup({ s: g.guild });
     expect(await adapter.listEmojis("s")).toEqual([{ id: "e1", name: "wave", animated: true }]);
   });
