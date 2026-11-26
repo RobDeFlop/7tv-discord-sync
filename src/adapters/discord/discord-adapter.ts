@@ -29,6 +29,10 @@ export class DiscordAdapter extends DiscordPort {
     return (await this.guilds.getGuild(server)).listEmojis();
   }
 
+  public async downloadEmojiImage(server: ServerId, emoji: DiscordEmoji): Promise<EmojiImage | null> {
+    return (await this.guilds.getGuild(server)).downloadEmojiImage(emoji);
+  }
+
   public createEmoji(server: ServerId, emoji: { name: string; image: EmojiImage }): Promise<DiscordEmoji> {
     return this.write(server, (g) => g.createEmoji(emoji.name, emoji.image));
   }

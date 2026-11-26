@@ -32,12 +32,28 @@ export class SyncCore {
     return new LinkSourceSetCommand(await this.context.sevenTv.resolveUserLink(link));
   }
 
-  /** Prepare the image for an emote preview without reading or modifying Server state. */
-  public async prepareEmoteAdd(link: string): Promise<PreparedEmoteAdd | { feedback: FeedbackMessage }> {
+  /** Prepare an emote preview without saving state or changing any Discord emojis. */
+  public async prepareEmoteAdd(server: ServerId, link: string): Promise<PreparedEmoteAdd | { feedback: FeedbackMessage }> {
     const emote = await this.context.sevenTv.resolveEmoteLink(link);
-    const result = await this.context.sevenTv.downloadImage(emote.id);
-    if (result.ok) return { emote, image: result.image };
-    return { feedback: { level: "error", text: `Could not preview this emote. ${new ImageFailure(emote, result.reason).text}` } };
+    const synced = await this.context.load(server);
+    const managed = synced.state.findManaged(emote.id);
+    const existing = managed ? synced.emojiOf(managed) : undefined;
+    const result = await this.context.sevenTv.downloadImage(emote.id).catch((error: unknown) => {
+      if (!existing) throw error;
+      return { ok: false, reason: "unavailable" } as const;
+    });
+    if (!result.ok) {
+      if (existing) {
+        const image = await this.context.discord.downloadEmojiImage(server, existing);
+        if (image) return { emote, image, defaultName: existing.name };
+      }
+      return { feedback: { level: "error", text: `Could not preview this emote. ${new ImageFailure(emote, result.reason).text}` } };
+    }
+
+    if (existing) return { emote, image: result.image, defaultName: existing.name };
+    const plan = await this.context.allocator.plan(synced, ServerQuotas.quotaOf(emote.animated), "requested");
+    const { name } = this.context.allocator.placementName(synced, emote.name, plan.ok ? plan.displace : null);
+    return { emote, image: result.image, defaultName: name };
   }
 
   /** Apply an admin command to a Server. Domain errors come back as feedback. */

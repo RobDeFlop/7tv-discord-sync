@@ -159,6 +159,110 @@ describe("/emote add preview", () => {
     expect(sevenTv.downloadCount("e1")).toBe(1);
   });
 
+  test("changing the preview image or its bytes cannot affect the uploaded image", async () => {
+    const { discord, sevenTv, openPreview, interact } = setup();
+    const bytes = Buffer.from([1, 2, 3]);
+    spyOn(sevenTv, "downloadImage").mockResolvedValue({ ok: true, image: { bytes, animated: false } });
+    const preview = await openPreview();
+    preview.image.bytes.fill(0);
+    preview.image.bytes = new Uint8Array(0);
+    preview.image.animated = true;
+
+    expect((await interact(preview.id, { kind: "add" })).text).toContain("Added Pog");
+    const [emoji] = discord.emojis(S);
+    expect(discord.images.get(emoji!.id)).toEqual({ bytes: Buffer.from([1, 2, 3]), animated: false });
+  });
+
+  test("previews and imports the exact available default when the original name is reserved", async () => {
+    const { discord, store, openPreview, interact } = setup();
+    const reserved = discord.seedEmoji(S, { name: "pog", animated: false });
+    const preview = await openPreview();
+    expect(preview.originalName).toBe("Pog");
+    expect(preview.defaultName).toBe("Pog_2");
+    expect(discord.emojis(S)).toEqual([reserved]);
+    expect(await store.listServers()).toEqual([]);
+
+    expect((await interact(preview.id, { kind: "add" })).text).toContain("Added Pog_2");
+    expect(discord.emojis(S).map((e) => e.name)).toEqual(["pog", "Pog_2"]);
+    expect((await store.load(S)).requestedEmotes).toEqual([{ sevenTvEmoteId: "e1", requestedName: "Pog_2" }]);
+  });
+
+  test("Add rechecks the displayed name under the Server lock and won't import under a suffix", async () => {
+    const { discord, store, lock, openPreview, interact } = setup();
+    const { id, defaultName } = await openPreview();
+    const gate = Promise.withResolvers<void>();
+    const busy = lock.run(S, async () => {
+      await gate.promise;
+      discord.seedEmoji(S, { name: defaultName, animated: false });
+    });
+    const confirmation = interact(id, { kind: "add" });
+    gate.resolve();
+    await busy;
+
+    expect((await confirmation).text).toContain("Pog is already in use. Run `/emote add` again and choose another name.");
+    expect(discord.emojis(S).map((e) => e.name)).toEqual(["Pog"]);
+    expect((await store.load(S)).requestedEmotes).toEqual([]);
+  });
+
+  test("a submitted name that is already in use asks for a different name without importing", async () => {
+    const { discord, store, openPreview, interact } = setup();
+    const { id } = await openPreview();
+    await interact(id, { kind: "name" });
+    const reserved = discord.seedEmoji(S, { name: "poggers", animated: false });
+
+    expect((await interact(id, { kind: "submit", name: "Poggers" })).text).toContain("choose another name");
+    expect(discord.emojis(S)).toEqual([reserved]);
+    expect((await store.load(S)).requestedEmotes).toEqual([]);
+    const retry = await openPreview();
+    expect((await interact(retry.id, { kind: "submit", name: "PogChamp" })).text).toContain("Added PogChamp");
+    expect(discord.emojis(S).map((e) => e.name)).toEqual(["poggers", "PogChamp"]);
+  });
+
+  test("plain Add preserves the existing name on a Requested Emote", async () => {
+    const { discord, store, openPreview, interact } = setup();
+    await interact((await openPreview()).id, { kind: "submit", name: "poggers" });
+    const existing = discord.emojis(S);
+
+    const retry = await openPreview();
+    expect(retry.originalName).toBe("Pog");
+    expect(retry.defaultName).toBe("poggers");
+    expect((await interact(retry.id, { kind: "add" })).text).toContain("poggers is already on this Server");
+    expect(discord.emojis(S)).toEqual(existing);
+    expect((await store.load(S)).requestedEmotes).toEqual([{ sevenTvEmoteId: "e1", requestedName: "poggers" }]);
+  });
+
+  test("an unavailable 7TV image falls back to the mirrored Discord image and Add promotes it", async () => {
+    const { discord, sevenTv, store, run, events, openPreview, interact } = setup();
+    await run("set link", { link: "https://7tv.app/users/u1" });
+    await events.idle();
+    const mirrored = discord.emojis(S)[0]!;
+    const state = (await store.load(S)).toSnapshot();
+    sevenTv.disableDownload("e1");
+
+    const preview = await openPreview();
+    expect(preview.image).toEqual(discord.images.get(mirrored.id)!);
+    expect(preview.defaultName).toBe(mirrored.name);
+    expect((await store.load(S)).toSnapshot()).toEqual(state);
+    expect((await interact(preview.id, { kind: "add" })).text).toContain("Pog is now a Requested Emote");
+    expect(discord.emojis(S)).toEqual([mirrored]);
+    expect((await store.load(S)).findManaged("e1")?.tier).toBe("requested");
+  });
+
+  test("submitting a taken name doesn't rename or promote a mirrored emote", async () => {
+    const { discord, store, run, events, openPreview, interact } = setup();
+    await run("set link", { link: "https://7tv.app/users/u1" });
+    await events.idle();
+    discord.seedEmoji(S, { name: "poggers", animated: false });
+    const original = discord.emojis(S);
+
+    const { id } = await openPreview();
+    expect((await interact(id, { kind: "submit", name: "poggers" })).text).toContain("choose another name");
+    expect(discord.emojis(S)).toEqual(original);
+    const state = await store.load(S);
+    expect(state.findManaged("e1")?.tier).toBe("source");
+    expect(state.requestedEmotes).toEqual([]);
+  });
+
   test("prefills the original name, explains invalid names, and imports on valid submission", async () => {
     const { discord, sevenTv, openPreview, interact } = setup();
     sevenTv.renameEmote("e1", "Pog Champ");

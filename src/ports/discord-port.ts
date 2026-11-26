@@ -13,6 +13,8 @@ export abstract class DiscordPort {
   /** Whether the bot holds Manage Expressions on the Server, i.e. may add, rename and remove emojis. */
   public abstract hasManageExpressions(server: ServerId): Promise<boolean>;
   public abstract listEmojis(server: ServerId): Promise<DiscordEmoji[]>;
+  /** Read the existing Discord image for a preview, or return null if unavailable. */
+  public abstract downloadEmojiImage(server: ServerId, emoji: DiscordEmoji): Promise<EmojiImage | null>;
   public abstract createEmoji(server: ServerId, emoji: { name: string; image: EmojiImage }): Promise<DiscordEmoji>;
   public abstract renameEmoji(server: ServerId, emojiId: string, name: string): Promise<void>;
   public abstract deleteEmoji(server: ServerId, emojiId: string): Promise<void>;

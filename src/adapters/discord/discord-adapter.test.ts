@@ -28,6 +28,10 @@ class TestGuild extends GuildGateway {
     return [...this.emojis.values()];
   }
 
+  public async downloadEmojiImage(emoji: Emoji): Promise<EmojiImage | null> {
+    return this.emojis.has(emoji.id) ? img(emoji.animated) : null;
+  }
+
   public async createEmoji(name: string, image: EmojiImage): Promise<Emoji> {
     this.calls.push(`create ${name}`);
     const f = this.failures.shift();
@@ -89,6 +93,13 @@ describe("DiscordAdapter", () => {
     await g.guild.createEmoji("wave", img(true));
     const { adapter } = setup({ s: g.guild });
     expect(await adapter.listEmojis("s")).toEqual([{ id: "e1", name: "wave", animated: true }]);
+  });
+
+  test("downloads an existing image without requiring Manage Expressions", async () => {
+    const g = fakeGuild({ canManage: false });
+    const emoji = await g.guild.createEmoji("wave", img(true));
+    const { adapter } = setup({ s: g.guild });
+    expect(await adapter.downloadEmojiImage("s", emoji)).toEqual(img(true));
   });
 
   test("creates, renames and deletes through the queue", async () => {

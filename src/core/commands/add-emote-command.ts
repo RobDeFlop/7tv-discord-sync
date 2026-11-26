@@ -20,6 +20,7 @@ import { Command } from "./command.ts";
 export interface PreparedEmoteAdd {
   emote: SevenTvEmote;
   image: EmojiImage;
+  defaultName: string;
 }
 
 /** Add a 7TV emote as a Requested Emote. */
@@ -48,14 +49,21 @@ export class AddEmoteCommand extends Command {
     const { state } = synced;
     const report = new SyncReport();
     const emoji = synced.emojiOf(existing);
+    const wanted = this.name ? EmoteNamer.unique(this.name, synced.emojiNamesExcept(emoji.id)) : undefined;
+    if (typeof this.source !== "string") {
+      if (this.name && wanted?.suffixed) return AddEmoteCommand.nameTaken(this.name);
+      if (!this.name && emoji.name !== this.source.defaultName) {
+        return SyncReport.single("error", "The Discord emoji name changed. Run `/emote add` again to review the name.");
+      }
+    }
+
     const promoted = existing.tier !== "requested";
     if (promoted) {
       existing.promoteTo("requested");
       state.addRequestedEmote({ sevenTvEmoteId: emote.id, requestedName: this.name });
     }
     let name = emoji.name;
-    if (this.name) {
-      const wanted = EmoteNamer.unique(this.name, synced.emojiNamesExcept(emoji.id));
+    if (this.name && wanted) {
       if (wanted.name !== emoji.name) {
         await synced.renameEmoji(emoji, wanted.name);
         report.change({ type: "renamed", from: emoji.name, to: wanted.name });
@@ -87,8 +95,13 @@ export class AddEmoteCommand extends Command {
     const plan = await context.allocator.plan(synced, quota, "requested");
     if (!plan.ok) throw new QuotaFullError(quota, emote.name);
 
+    const requestedName = this.name ?? (typeof this.source === "string" ? undefined : this.source.defaultName);
+    const wanted = requestedName ?? emote.name;
+    if (typeof this.source !== "string" && context.allocator.placementName(synced, wanted, plan.displace).suffixed) {
+      return AddEmoteCommand.nameTaken(wanted);
+    }
+
     const report = new SyncReport();
-    const wanted = this.name ?? emote.name;
     let placed: Placement;
     try {
       placed = await context.allocator.place(synced, report, plan, emote, result.image, "requested", wanted);
@@ -97,7 +110,7 @@ export class AddEmoteCommand extends Command {
       report.say("error", error.toFeedback().text);
       return report.toResult();
     }
-    state.addRequestedEmote({ sevenTvEmoteId: emote.id, requestedName: this.name });
+    state.addRequestedEmote({ sevenTvEmoteId: emote.id, requestedName });
     if (placed.suffixed) {
       const collision = NameCollision.onAdd(wanted, placed.name, emote.id);
       collision.record(state);
@@ -106,5 +119,9 @@ export class AddEmoteCommand extends Command {
       report.say("info", `Added ${placed.name}.`);
     }
     return report.toResult();
+  }
+
+  private static nameTaken(name: string): SyncResult {
+    return SyncReport.single("error", `${name} is already in use. Run \`/emote add\` again and choose another name.`);
   }
 }

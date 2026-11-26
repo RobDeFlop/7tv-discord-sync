@@ -9,7 +9,6 @@ interface PendingEmoteAdd {
   serverId: ServerId;
   userId: string;
   prepared: PreparedEmoteAdd;
-  defaultName: string;
   expiresAt: number;
   timer: ReturnType<typeof setTimeout>;
 }
@@ -28,17 +27,20 @@ export class EmoteAddSlashCommand extends SlashCommand {
   private readonly pending = new Map<string, PendingEmoteAdd>();
 
   protected async run(serverId: ServerId, request: SlashRequest): Promise<SlashReply> {
-    const prepared = await this.core.prepareEmoteAdd(this.requiredString(request, "link"));
+    const prepared = await this.core.prepareEmoteAdd(serverId, this.requiredString(request, "link"));
     if ("feedback" in prepared) return FeedbackRouter.format([prepared.feedback]);
 
     const id = crypto.randomUUID();
-    const originalName = prepared.emote.name;
-    const defaultName = EmoteNamer.sanitize(originalName);
     const expiresAt = Date.now() + EmoteAddSlashCommand.PREVIEW_TTL_MS;
     const timer = setTimeout(() => this.pending.delete(id), EmoteAddSlashCommand.PREVIEW_TTL_MS);
     timer.unref();
-    this.pending.set(id, { serverId, userId: request.userId, prepared, defaultName, expiresAt, timer });
-    return { id, originalName, defaultName, image: prepared.image };
+    this.pending.set(id, { serverId, userId: request.userId, prepared, expiresAt, timer });
+    return {
+      id,
+      originalName: prepared.emote.name,
+      defaultName: prepared.defaultName,
+      image: { animated: prepared.image.animated, bytes: new Uint8Array(prepared.image.bytes) },
+    };
   }
 
   public async handleInteraction(request: EmoteAddInteraction): Promise<void> {
@@ -60,7 +62,7 @@ export class EmoteAddSlashCommand extends SlashCommand {
     clearTimeout(pending.timer);
     if (action.kind === "cancel") return request.reply("Cancelled. No emote was added.");
 
-    const name = action.kind === "submit" ? action.name : pending.defaultName;
+    const name = action.kind === "submit" ? action.name : undefined;
     await request.defer();
     let reply: string;
     try {

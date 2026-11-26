@@ -116,6 +116,12 @@ export class FakeDiscord extends DiscordPort {
     return this.emojis(id);
   }
 
+  public async downloadEmojiImage(id: ServerId, emoji: DiscordEmoji): Promise<EmojiImage | null> {
+    if (!this.server(id).emojis.some((e) => e.id === emoji.id)) return null;
+    const image = this.images.get(emoji.id);
+    return image ? { bytes: new Uint8Array(image.bytes), animated: image.animated } : null;
+  }
+
   public async createEmoji(id: ServerId, emoji: { name: string; image: EmojiImage }): Promise<DiscordEmoji> {
     const s = this.server(id);
     this.assertCanManage(id);
