@@ -18,7 +18,9 @@ The codebase is object-oriented TypeScript. Model behaviour with classes, use in
 
 ## Value objects
 
-Wrap domain values that have rules in small immutable classes: `EmoteName` (sanitising, collision suffixes), `Quota` (static/animated, slot limit per boost level), `ServerQuotas`.
+Use a small immutable class only for a domain value that carries more than one field or real behaviour, such as `ServerQuotas` (static/animated limits per boost level).
+
+Don't wrap a single string or a string union in a class. Ids, emote names and `Quota` (`"static" | "animated"`) stay plain type aliases. Rules about them (sanitising names, collision suffixes) go on the class that uses them, for example a `static` method on `EmoteNamer` or `SyncCore`.
 
 ## Encapsulation
 
@@ -28,7 +30,7 @@ Wrap domain values that have rules in small immutable classes: `EmoteName` (sani
 
 ## Where plain types are fine
 
-Interfaces and type aliases are fine for data that has no behaviour: 7TV API response shapes, database rows, config, snapshots, and the `Change` / feedback records the core returns.
+Type aliases are fine for single primitive values (ids, names, string unions). Interfaces and type aliases are fine for data that has no behaviour: 7TV API response shapes, database rows, config, snapshots, and the `Change` / feedback records the core returns.
 
 ## Tests
 
