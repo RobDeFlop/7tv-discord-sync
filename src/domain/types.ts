@@ -97,7 +97,7 @@ export interface FeedbackMessage {
 export type Change =
   | { type: "created"; name: string; animated: boolean; sevenTvEmoteId: SevenTvEmoteId; tier: ManagedTier }
   | { type: "renamed"; from: string; to: string }
-  | { type: "deleted"; name: string; reason: "removed" | "displaced" | "unlinked" | "trending-off" }
+  | { type: "deleted"; name: string; reason: "removed" | "displaced" | "unlinked" | "trending-off" | "boost-lost" }
   | { type: "reserved"; name: string };
 
 export interface SyncResult {

@@ -1,14 +1,8 @@
-import type { DiscordEmoji, EmojiImage, ServerId } from "../../domain/index.ts";
+import { MissingPermissionError, type DiscordEmoji, type EmojiImage, type ServerId } from "../../domain/index.ts";
 import { DiscordPort } from "../../ports/index.ts";
 import type { GuildGateway, GuildProvider } from "./guild-gateway.ts";
 import { RateLimitError, WriteQueue, type QueueProgress } from "./write-queue.ts";
 
-/** The bot lacks Manage Expressions on a Server. The core maps it to feedback. */
-export class MissingPermissionError extends Error {
-  public constructor(public readonly server: ServerId) {
-    super(`Missing Manage Expressions permission in server ${server}`);
-  }
-}
 
 export class DiscordAdapter extends DiscordPort {
   public constructor(
@@ -56,4 +50,4 @@ export class DiscordAdapter extends DiscordPort {
   }
 }
 
-export { RateLimitError };
+export { MissingPermissionError, RateLimitError };

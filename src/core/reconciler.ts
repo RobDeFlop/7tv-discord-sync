@@ -1,4 +1,5 @@
-import type { ServerId, SyncResult } from "../domain/index.ts";
+import { DomainError, type ServerId, type SyncResult } from "../domain/index.ts";
+import { QuotaShrink } from "./quota-shrink.ts";
 import type { ReconcileStep } from "./reconcile-step.ts";
 import { SourceSetMirror } from "./source-set-mirror.ts";
 import { SyncReport } from "./sync-report.ts";
@@ -10,13 +11,19 @@ export class Reconciler {
   private readonly steps: ReadonlyArray<ReconcileStep>;
 
   public constructor(private readonly context: SyncContext) {
-    this.steps = [new SourceSetMirror(context), new TrendingFill(context)];
+    this.steps = [new QuotaShrink(context), new SourceSetMirror(context), new TrendingFill(context)];
   }
 
   public async reconcile(server: ServerId): Promise<SyncResult> {
     const synced = await this.context.load(server);
     const report = new SyncReport();
-    for (const step of this.steps) report.merge(await step.run(synced));
+    try {
+      for (const step of this.steps) report.merge(await step.run(synced));
+    } catch (err) {
+      // Stop at the first domain error (e.g. missing permission) but keep the state of what was done.
+      if (!(err instanceof DomainError)) throw err;
+      report.say(err.toFeedback().level, err.toFeedback().text);
+    }
     await this.context.store.save(server, synced.state);
     return report.toResult();
   }
