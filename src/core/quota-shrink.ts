@@ -27,7 +27,6 @@ export class QuotaShrink extends ReconcileStep {
       const emoji = synced.emojiOf(managed);
       await synced.deleteEmoji(emoji);
       state.removeManagedEmote(managed);
-      if (managed.tier === "requested") state.removeRequestedEmote(managed.sevenTvEmoteId);
       report.change({ type: "deleted", name: emoji.name, reason: "boost-lost" });
       report.say(
         "warning",

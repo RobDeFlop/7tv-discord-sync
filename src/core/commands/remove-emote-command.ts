@@ -21,7 +21,6 @@ export class RemoveEmoteCommand extends Command {
     }
     await synced.deleteEmoji(emoji);
     state.removeManagedEmote(managed);
-    if (managed.tier === "requested") state.removeRequestedEmote(managed.sevenTvEmoteId);
     await context.store.save(server, state);
     const report = new SyncReport();
     report.change({ type: "deleted", name: this.name, reason: "removed" });
