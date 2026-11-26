@@ -1,8 +1,13 @@
 import type { LinkSourceSetCommand, SyncCore } from "../core/index.ts";
 import type { ServerId } from "../domain/index.ts";
-import type { SevenTvChange, SevenTvPort, StorePort } from "../ports/index.ts";
+import { RateLimitError, type SevenTvChange, type SevenTvPort, type StorePort } from "../ports/index.ts";
 import type { FeedbackRouter } from "./feedback-router.ts";
 import type { ServerLock } from "./server-lock.ts";
+
+interface SyncRetry {
+  delay: number;
+  timer: ReturnType<typeof setTimeout> | null;
+}
 
 /** The Servers the bot is currently in. */
 export abstract class ServerDirectory {
@@ -14,6 +19,7 @@ export abstract class ServerDirectory {
  * the feedback to the log channel. Holds no domain rules.
  */
 export class GatewayEvents {
+  private readonly retries = new Map<ServerId, SyncRetry>();
   private readonly inFlight = new Set<Promise<unknown>>();
 
   public constructor(
@@ -36,7 +42,10 @@ export class GatewayEvents {
 
   /** The bot was removed from a Server; forget everything about it. */
   public serverLeft(server: ServerId): Promise<void> {
-    return this.track(this.lock.run(server, () => this.store.remove(server)).catch((e) => this.report(server, e)));
+    return this.track(this.lock.run(server, () => {
+      this.clearRetry(server);
+      return this.store.remove(server);
+    }).catch((e) => this.report(server, e)));
   }
 
   /** An emoji was created, deleted or renamed. */
@@ -82,26 +91,59 @@ export class GatewayEvents {
     while (this.inFlight.size > 0) await Promise.allSettled([...this.inFlight]);
   }
 
-  private reconcile(server: ServerId): Promise<void> {
+  private reconcile(server: ServerId, retry?: SyncRetry): Promise<void> {
     const work = this.lock
-      .coalesce(server, () => this.sync(server, false))
+      .coalesce(server, async () => {
+        if (retry && this.retries.get(server) !== retry) return; // cancelled before acquiring the lock
+        await this.sync(server, false);
+      })
       .catch((e) => this.report(server, e));
     return this.track(work);
   }
 
   private async sync(server: ServerId, requested: boolean, link?: LinkSourceSetCommand): Promise<void> {
+    const retry = this.retries.get(server);
+    if (!link && retry?.timer) return; // the scheduled retry covers this event
     try {
       const result = link ? await this.core.apply(server, link) : await this.core.reconcile(server);
-      if (requested && !result.feedback.some((message) => message.level === "error")) {
+      this.clearRetry(server);
+      if ((requested || retry) && !result.feedback.some((message) => message.level === "error")) {
         result.feedback.push({ level: "info", text: `Sync complete: ${result.changes.length} emoji changes.` });
       }
       await this.feedback.deliver(server, result);
     } catch (error) {
+      if (error instanceof RateLimitError) {
+        await this.resumeAfterRateLimit(server, error);
+        return;
+      }
+      this.clearRetry(server);
       this.report(server, error);
       await this.feedback.deliver(server, {
         changes: [], feedback: [{ level: "error", text: "Sync failed. Try /sync again in a moment." }],
       });
     }
+  }
+
+  /** Called under the Server lock after the write queue exhausts its own retries. */
+  public async resumeAfterRateLimit(server: ServerId, error: RateLimitError): Promise<string> {
+    const previous = this.retries.get(server)?.delay ?? 500;
+    const delay = Math.max(error.retryAfterMs, Math.min(previous * 2, 300_000));
+    this.clearRetry(server);
+    const retry: SyncRetry = { delay, timer: null };
+    retry.timer = setTimeout(() => {
+      retry.timer = null;
+      void this.reconcile(server, retry);
+    }, delay);
+    this.retries.set(server, retry);
+    const text = `Sync paused by Discord's rate limit; it will resume in ${Math.ceil(delay / 1000)}s.`;
+    await this.feedback.deliver(server, { changes: [], feedback: [{ level: "warning", text }] });
+    return text;
+  }
+
+  private clearRetry(server: ServerId): void {
+    const retry = this.retries.get(server);
+    if (retry?.timer) clearTimeout(retry.timer);
+    this.retries.delete(server);
   }
 
   private track(work: Promise<void>): Promise<void> {
