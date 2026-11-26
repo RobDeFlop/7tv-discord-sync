@@ -44,6 +44,7 @@ export abstract class SlashCommand {
     }
   }
 
+  /** Do the work and return the ephemeral reply. */
   protected abstract run(server: ServerId, request: SlashRequest): Promise<SlashReply>;
 
   protected async apply(server: ServerId, command: Command): Promise<string> {

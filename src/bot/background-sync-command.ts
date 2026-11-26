@@ -12,8 +12,7 @@ export abstract class BackgroundSyncCommand extends SlashCommand {
     super(core, lock);
   }
 
-  protected queue(server: ServerId, link?: LinkSourceSetCommand): string {
+  protected queue(server: ServerId, link?: LinkSourceSetCommand): void {
     this.events.requestSync(server, link);
-    return "Sync queued. Check /status for progress or the configured log channel for the result.";
   }
 }

@@ -13,6 +13,7 @@ export class SetLinkSlashCommand extends BackgroundSyncCommand {
 
   protected async run(server: ServerId, request: SlashRequest): Promise<string> {
     const command = await this.core.prepareSourceLink(this.requiredString(request, "link"));
-    return this.queue(server, command);
+    this.queue(server, command);
+    return "Sync queued. Check /status for progress or the configured log channel for the result.";
   }
 }

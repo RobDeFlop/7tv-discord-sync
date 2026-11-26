@@ -1,4 +1,7 @@
+import type { SyncCore } from "../../core/index.ts";
 import type { ServerId, ServerStatus, TierUsage } from "../../domain/index.ts";
+import type { LogChannel } from "../feedback-router.ts";
+import type { ServerLock } from "../server-lock.ts";
 import { SlashCommand } from "../slash-command.ts";
 import type { SlashRequest } from "../slash-request.ts";
 
@@ -9,11 +12,17 @@ export class StatusSlashCommand extends SlashCommand {
 
   protected override readonly needsLock = false;
 
-  protected async run(server: ServerId, _request: SlashRequest): Promise<string> {
-    return StatusSlashCommand.render(await this.core.status(server), Date.now());
+  public constructor(core: SyncCore, lock: ServerLock, private readonly logChannel: LogChannel) {
+    super(core, lock);
   }
 
-  private static render(status: ServerStatus, now: number): string {
+  protected async run(server: ServerId, _request: SlashRequest): Promise<string> {
+    const status = await this.core.status(server);
+    const hasEmbedLinks = status.logChannelId ? await this.logChannel.hasEmbedLinks(status.logChannelId) : null;
+    return StatusSlashCommand.render(status, Date.now(), hasEmbedLinks);
+  }
+
+  private static render(status: ServerStatus, now: number, hasEmbedLinks: boolean | null): string {
     const lines = [
       ...(status.manageExpressions ? [] : ["Error: I am missing the Manage Expressions permission, so I cannot change emojis."]),
       StatusSlashCommand.usage("Static", status.quotas.static),
@@ -21,6 +30,9 @@ export class StatusSlashCommand extends SlashCommand {
       `Linked 7TV user: ${status.linkedUserId ?? "none"}`,
       `Trending Fill: ${status.trending.enabled ? `on (${status.trending.period})` : "off"}`,
       `Log channel: ${status.logChannelId ? `<#${status.logChannelId}>` : "not set"}`,
+      ...(status.logChannelId && hasEmbedLinks === false
+        ? [`Warning: I am missing Embed Links in <#${status.logChannelId}>. Grant me Embed Links in that channel to restore sync feedback.`]
+        : []),
       StatusSlashCommand.queue(status, now),
     ];
     if (status.problems.length > 0) {
