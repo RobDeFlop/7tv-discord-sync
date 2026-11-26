@@ -250,3 +250,12 @@ describe("static and animated pools", () => {
     expect(st.quotas.animated).toMatchObject({ used: 1, free: 49 });
   });
 });
+
+describe("status write queue", () => {
+  test("reports pending writes and rate-limit retry time from the Discord port", async () => {
+    const { discord, core } = setup();
+    expect((await core.status(S)).writeQueue).toEqual({ pending: 0, retryingAt: null });
+    discord.setQueueProgress(S, { pending: 3, retryingAt: 1234 });
+    expect((await core.status(S)).writeQueue).toEqual({ pending: 3, retryingAt: 1234 });
+  });
+});

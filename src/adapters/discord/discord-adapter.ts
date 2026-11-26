@@ -13,7 +13,7 @@ export class DiscordAdapter extends DiscordPort {
   }
 
   /** Pending writes and rate-limit retry time for a Server, for /status. */
-  public queueProgress(server: ServerId): QueueProgress {
+  public override queueProgress(server: ServerId): QueueProgress {
     return this.queue.progress(server);
   }
 

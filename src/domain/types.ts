@@ -111,7 +111,15 @@ export interface TierUsage {
   byTier: Record<Tier, number>;
 }
 
+/** Discord writes for a Server that are still waiting, and when a rate-limited one retries. */
+export interface WriteQueueProgress {
+  pending: number;
+  /** Epoch milliseconds, or null when not rate limited. */
+  retryingAt: number | null;
+}
+
 export interface ServerStatus {
+  writeQueue: WriteQueueProgress;
   quotas: Record<Quota, TierUsage>;
   problems: Problem[];
   logChannelId: string | null;

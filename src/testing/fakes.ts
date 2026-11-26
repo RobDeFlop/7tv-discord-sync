@@ -13,6 +13,7 @@ import {
   type SevenTvUser,
   type SevenTvUserId,
   type TrendingPeriod,
+  type WriteQueueProgress,
 } from "../domain/index.ts";
 import { ImagePipeline } from "../image/pipeline.ts";
 import {
@@ -39,6 +40,17 @@ export class FakeDiscord extends DiscordPort {
 
   public addServer(id: ServerId, opts: { boostLevel?: number } = {}): void {
     this.servers.set(id, { boostLevel: opts.boostLevel ?? 0, emojis: [], canManage: true });
+  }
+
+  private readonly progress = new Map<ServerId, WriteQueueProgress>();
+
+  /** Pretend writes are queued, for /status. */
+  public setQueueProgress(id: ServerId, progress: WriteQueueProgress): void {
+    this.progress.set(id, progress);
+  }
+
+  public override queueProgress(id: ServerId): WriteQueueProgress {
+    return this.progress.get(id) ?? super.queueProgress(id);
   }
 
   /** From now on writes fail with MissingPermissionError, as without Manage Expressions. */
