@@ -9,6 +9,7 @@ import {
   type Quota,
 } from "../domain/index.ts";
 import type { DiscordPort, SevenTvPort, StorePort } from "../ports/index.ts";
+import { LinkSourceSetCommand } from "./commands/link-source-set-command.ts";
 import type { Command } from "./commands/command.ts";
 import { SyncContext } from "./sync-context.ts";
 import type { SyncedServer } from "./synced-server.ts";
@@ -21,6 +22,11 @@ export class SyncCore {
 
   public constructor(sevenTv: SevenTvPort, discord: DiscordPort, store: StorePort) {
     this.context = new SyncContext(sevenTv, discord, store);
+  }
+
+  /** Validate a link before accepting a background sync; this does not mutate Server state. */
+  public async prepareSourceLink(link: string): Promise<LinkSourceSetCommand> {
+    return new LinkSourceSetCommand(await this.context.sevenTv.resolveUserLink(link));
   }
 
   /** Apply an admin command to a Server. Domain errors come back as feedback. */

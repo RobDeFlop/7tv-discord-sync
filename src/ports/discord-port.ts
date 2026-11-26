@@ -1,5 +1,12 @@
 import { ServerQuotas, type DiscordEmoji, type EmojiImage, type ServerId, type WriteQueueProgress } from "../domain/index.ts";
 
+/** A write hit Discord's rate limit; the queue waits and retries. */
+export class RateLimitError extends Error {
+  public constructor(public readonly retryAfterMs: number) {
+    super(`Rate limited, retry after ${retryAfterMs}ms`);
+  }
+}
+
 export abstract class DiscordPort {
   /** The Server's current boost level (0 to 3). */
   public abstract getBoostLevel(server: ServerId): Promise<number>;

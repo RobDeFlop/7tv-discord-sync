@@ -14,9 +14,10 @@ export class SourceSetMirror extends ReconcileStep {
   public async run(synced: SyncedServer): Promise<SyncResult> {
     const { state } = synced;
     const report = new SyncReport();
-    const hadPending = state.pendingEmoteIds();
-    state.clearPending();
-    if (!state.linkedUserId) return report.toResult();
+    if (!state.linkedUserId) {
+      state.clearPending();
+      return report.toResult();
+    }
 
     const user = await this.context.sevenTv.getUser(state.linkedUserId);
     if (!user) {
@@ -24,6 +25,12 @@ export class SourceSetMirror extends ReconcileStep {
       return report.toResult();
     }
     const set = user.activeSetId ? await this.context.sevenTv.getSet(user.activeSetId) : null;
+    if (user.activeSetId && !set) {
+      report.say("warning", "The active 7TV set could not be found; the Source Set was not synced.");
+      return report.toResult();
+    }
+    const hadPending = state.pendingEmoteIds();
+    state.clearPending();
     const wanted = (set?.emotes ?? []).filter((e, i, all) => all.findIndex((o) => o.id === e.id) === i);
 
     await this.removeDeparted(synced, report, new Set(wanted.map((e) => e.id)));
@@ -37,10 +44,7 @@ export class SourceSetMirror extends ReconcileStep {
   private async removeDeparted(synced: SyncedServer, report: SyncReport, wantedIds: Set<string>): Promise<void> {
     for (const managed of synced.state.managedOfTier("source")) {
       if (wantedIds.has(managed.sevenTvEmoteId)) continue;
-      const emoji = synced.emojiOf(managed);
-      await synced.deleteEmoji(emoji);
-      synced.state.removeManagedEmote(managed);
-      report.change({ type: "deleted", name: emoji.name, reason: "removed" });
+      await synced.removeManaged(managed, report, "removed");
     }
   }
 
