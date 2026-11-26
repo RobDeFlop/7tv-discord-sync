@@ -34,10 +34,12 @@ bun install
 Copy the **Application ID** from **General Information**, put it into this URL and open it:
 
 ```
-https://discord.com/oauth2/authorize?client_id=YOUR_APPLICATION_ID&scope=bot+applications.commands&permissions=1073744896
+https://discord.com/oauth2/authorize?client_id=YOUR_APPLICATION_ID&scope=bot+applications.commands&permissions=1073761280
 ```
 
-This grants **Manage Expressions** (to add, rename and remove emojis), **View Channel** and **Send Messages** (for the log channel). Make sure the bot can see and post in the channel you'll use as the log channel.
+This grants **Manage Expressions** (to add, rename and remove emojis), plus **View Channel**, **Send Messages** and **Embed Links** (for the log channel). Make sure the bot has these three channel permissions in the channel you'll use as the log channel.
+
+If the bot is already installed with an older invite, open the configured log channel's **Edit Channel → Permissions** settings and allow **Embed Links** for the bot or its role. Run `/status` to check for a missing **Embed Links** warning.
 
 ### 4. Set up a database
 
@@ -86,7 +88,7 @@ A typical first setup:
 | `/set link <7tv user link>` | Mirror that user's active emote set (Source Set) |
 | `/set unlink <delete\|keep>` | Stop mirroring; delete the emotes or keep them as Reserved Slots |
 | `/trending <on\|off> [period]` | Fill free slots with trending emotes (day, week, month, all-time; default week) |
-| `/sync` | Sync now |
+| `/sync` | Queue a sync and confirm it privately |
 | `/status` | Slot usage, settings, problems and pending Discord writes |
 | `/config log-channel <channel>` | Where automatic sync messages are posted |
 
@@ -107,7 +109,7 @@ An emote higher in the list pushes out one lower in the list. Animated emotes ar
 
 ### Automatic syncs
 
-The bot also syncs on its own when it joins a server, when emojis change, when the boost level changes, when the linked 7TV set changes, and once for every server at startup. Messages from those syncs go to the log channel if one is set. Problems are always shown in `/status`. Removing the bot from a server deletes that server's stored data; the emojis stay.
+The bot also syncs on its own when it joins a server, when emojis change, when the boost level changes, when the linked 7TV set changes, and once for every server at startup. Feedback from automatic and queued syncs goes to the configured log channel in embeds that separate results, warnings and errors. If there is no log channel or nothing to report, the bot does not post. Recorded problems remain visible in `/status`. Removing the bot from a server deletes that server's stored data; the emojis stay.
 
 ## Development
 

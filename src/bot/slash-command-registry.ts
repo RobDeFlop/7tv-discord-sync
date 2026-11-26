@@ -9,6 +9,7 @@ import { StatusSlashCommand } from "./commands/status-slash-command.ts";
 import { SyncSlashCommand } from "./commands/sync-slash-command.ts";
 import { TrendingSlashCommand } from "./commands/trending-slash-command.ts";
 import type { EmoteAddInteraction } from "./emote-add-interaction.ts";
+import type { LogChannel } from "./feedback-router.ts";
 import type { GatewayEvents } from "./gateway-events.ts";
 import type { ServerLock } from "./server-lock.ts";
 import type { SlashCommand, SlashOption } from "./slash-command.ts";
@@ -40,7 +41,7 @@ export class SlashCommandRegistry {
   private readonly commands: ReadonlyMap<string, SlashCommand>;
   private readonly emoteAdd: EmoteAddSlashCommand;
 
-  public constructor(core: SyncCore, lock: ServerLock, events: GatewayEvents) {
+  public constructor(core: SyncCore, lock: ServerLock, events: GatewayEvents, logChannel: LogChannel) {
     this.emoteAdd = new EmoteAddSlashCommand(core, lock);
     const all: SlashCommand[] = [
       this.emoteAdd,
@@ -49,7 +50,7 @@ export class SlashCommandRegistry {
       new SetUnlinkSlashCommand(core, lock),
       new TrendingSlashCommand(core, lock, events),
       new SyncSlashCommand(core, lock, events),
-      new StatusSlashCommand(core, lock),
+      new StatusSlashCommand(core, lock, logChannel),
       new ConfigLogChannelSlashCommand(core, lock),
     ];
     this.commands = new Map(all.map((c) => [c.path, c]));
