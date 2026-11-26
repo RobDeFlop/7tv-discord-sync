@@ -1,19 +1,23 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { SyncCore } from "../core/index.ts";
 import type { ServerId } from "../domain/index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
+import { EmoteAddInteraction, type EmoteAddAction, type EmoteAddPreview } from "./emote-add-interaction.ts";
 import { FeedbackRouter } from "./feedback-router.ts";
 import { GatewayEvents } from "./gateway-events.ts";
 import { FakeLogChannel, FakeServers } from "../testing/bot-fakes.ts";
 import { ServerLock } from "./server-lock.ts";
 import { SlashCommandRegistry } from "./slash-command-registry.ts";
-import { SlashRequest } from "./slash-request.ts";
+import { SlashRequest, type SlashReply } from "./slash-request.ts";
 
 const S = "server-1";
+const EMOTE_LINK = "https://7tv.app/emotes/e1";
 
 class FakeRequest extends SlashRequest {
   public readonly replies: string[] = [];
   public deferred = false;
+  public preview?: EmoteAddPreview;
+  public readonly userId = "admin";
 
   public constructor(
     public readonly commandPath: string,
@@ -38,12 +42,41 @@ class FakeRequest extends SlashRequest {
     this.deferred = true;
   }
 
-  public async reply(text: string): Promise<void> {
-    this.replies.push(text);
+  public async reply(reply: SlashReply): Promise<void> {
+    if (typeof reply === "string") this.replies.push(reply);
+    else this.preview = reply;
   }
 
   public get text(): string {
     return this.replies.join("\n");
+  }
+}
+
+class FakeEmoteAddInteraction extends EmoteAddInteraction {
+  public text = "";
+  public formValue?: string;
+  public deferred = false;
+
+  public constructor(
+    public readonly previewId: string,
+    public readonly action: EmoteAddAction,
+    public readonly userId = "admin",
+    public readonly serverId = S,
+    public readonly isAdministrator = true,
+  ) {
+    super();
+  }
+
+  public async showNameForm(originalName: string): Promise<void> {
+    this.formValue = originalName;
+  }
+
+  public async defer(): Promise<void> {
+    this.deferred = true;
+  }
+
+  public async reply(text: string): Promise<void> {
+    this.text = text;
   }
 }
 
@@ -65,7 +98,16 @@ function setup() {
     await registry.handle(req);
     return req;
   };
-  return { discord, sevenTv, store, core, lock, registry, run, events, log };
+  const openPreview = async () => {
+    const request = await run("emote add", { link: EMOTE_LINK });
+    return request.preview!;
+  };
+  const interact = async (id: string, action: EmoteAddAction) => {
+    const request = new FakeEmoteAddInteraction(id, action);
+    await registry.handleEmoteAddInteraction(request);
+    return request;
+  };
+  return { discord, sevenTv, store, core, lock, registry, run, openPreview, interact, events, log };
 }
 
 describe("access", () => {
@@ -97,22 +139,112 @@ describe("access", () => {
   });
 });
 
-describe("commands translate to core calls", () => {
-  test("/emote add adds a Requested Emote with an optional name", async () => {
-    const { discord, run } = setup();
-    const req = await run("emote add", { link: "https://7tv.app/emotes/e1", name: "poggers" });
+describe("/emote add preview", () => {
+  test("shows the image and original name without importing; Add uses the displayed name", async () => {
+    const { discord, sevenTv, store, openPreview, interact } = setup();
+    sevenTv.renameEmote("e1", "Pog Champ");
+    const preview = await openPreview();
+    expect(preview.originalName).toBe("Pog Champ");
+    expect(preview.defaultName).toBe("Pog_Champ");
+    expect(preview.image.bytes.byteLength).toBe(1024);
+    expect(discord.emojis(S)).toEqual([]);
+    expect(await store.listServers()).toEqual([]);
+
+    sevenTv.renameEmote("e1", "Changed");
+    const confirmation = await interact(preview.id, { kind: "add" });
+    expect(confirmation.deferred).toBe(true);
+    expect(confirmation.text).toContain("Added Pog_Champ");
+    expect((await store.load(S)).requestedEmotes).toEqual([{ sevenTvEmoteId: "e1", requestedName: "Pog_Champ" }]);
+    expect(discord.emojis(S).map((e) => e.name)).toEqual(["Pog_Champ"]);
+    expect(sevenTv.downloadCount("e1")).toBe(1);
+  });
+
+  test("prefills the original name, explains invalid names, and imports on valid submission", async () => {
+    const { discord, sevenTv, openPreview, interact } = setup();
+    sevenTv.renameEmote("e1", "Pog Champ");
+    const { id } = await openPreview();
+    expect((await interact(id, { kind: "name" })).formValue).toBe("Pog Champ");
+    for (const name of ["", "P", "a".repeat(33), "Pog Champ", "Pog\n"]) {
+      expect((await interact(id, { kind: "submit", name })).text).toContain("2–32 characters");
+      expect(discord.emojis(S)).toEqual([]);
+    }
+    expect((await interact(id, { kind: "name" })).formValue).toBe("Pog Champ");
+    expect((await interact(id, { kind: "submit", name: "poggers" })).text).toContain("Added poggers");
     expect(discord.emojis(S).map((e) => e.name)).toEqual(["poggers"]);
-    expect(req.text).toContain("Added poggers");
   });
 
-  test("/emote add with a bad link shows the core's feedback", async () => {
-    const { run } = setup();
+  test("cancels without importing, even if a naming form was already opened", async () => {
+    const { discord, store, openPreview, interact } = setup();
+    const { id } = await openPreview();
+    await interact(id, { kind: "name" });
+    expect((await interact(id, { kind: "cancel" })).text).toContain("Cancelled");
+    expect((await interact(id, { kind: "submit", name: "poggers" })).text).toContain("Run `/emote add` again");
+    expect((await interact(id, { kind: "add" })).text).toContain("Run `/emote add` again");
+    expect(discord.emojis(S)).toEqual([]);
+    expect(await store.listServers()).toEqual([]);
+  });
+
+  test("expired previews and forms explain how to restart without importing", async () => {
+    const { discord, openPreview, interact } = setup();
+    const { id } = await openPreview();
+    await interact(id, { kind: "name" });
+    const clock = spyOn(Date, "now").mockReturnValue(Date.now() + 30 * 60_000);
+    try {
+      for (const action of [{ kind: "add" }, { kind: "submit", name: "poggers" }] as const) {
+        expect((await interact(id, action)).text).toContain("Run `/emote add` again");
+      }
+      expect(discord.emojis(S)).toEqual([]);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  test.each(["add", "submit"] as const)("imports at most once when %s wins a button/form race", async (first) => {
+    const { discord, openPreview, interact } = setup();
+    const { id } = await openPreview();
+    await interact(id, { kind: "name" });
+    const add = { kind: "add" } as const;
+    const submit = { kind: "submit", name: "poggers" } as const;
+    const [winner, loser] = await Promise.all(first === "add"
+      ? [interact(id, add), interact(id, submit)]
+      : [interact(id, submit), interact(id, add)]);
+    const name = first === "add" ? "Pog" : "poggers";
+    expect(winner.text).toContain(`Added ${name}`);
+    expect(loser.text).toContain("Run `/emote add` again");
+    expect((await interact(id, add)).text).toContain("Run `/emote add` again");
+    expect(discord.emojis(S).map((e) => e.name)).toEqual([name]);
+  });
+
+  test("only the initiating admin in the same Server can use a preview", async () => {
+    const { discord, registry, openPreview, interact } = setup();
+    const { id } = await openPreview();
+    const otherUser = new FakeEmoteAddInteraction(id, { kind: "add" }, "someone-else");
+    const otherServer = new FakeEmoteAddInteraction(id, { kind: "add" }, "admin", "server-2");
+    const noLongerAdmin = new FakeEmoteAddInteraction(id, { kind: "add" }, "admin", S, false);
+    for (const request of [otherUser, otherServer, noLongerAdmin]) {
+      await registry.handleEmoteAddInteraction(request);
+      expect(request.deferred).toBe(false);
+    }
+    expect(noLongerAdmin.text).toContain("Administrator");
+    expect(discord.emojis(S)).toEqual([]);
+    expect((await interact(id, { kind: "add" })).text).toContain("Added Pog");
+  });
+
+  test("reports bad links and failed downloads without opening a preview or writing state", async () => {
+    const { run, sevenTv, store } = setup();
     expect((await run("emote add", { link: "nope" })).text).toContain("not a valid 7TV");
+    sevenTv.disableDownload("e1");
+    const request = await run("emote add", { link: EMOTE_LINK });
+    expect(request.preview).toBeUndefined();
+    expect(request.text).toContain("could not be downloaded");
+    expect(await store.listServers()).toEqual([]);
   });
+});
 
+describe("commands translate to core calls", () => {
   test("/emote remove removes a Managed Emote", async () => {
-    const { discord, run } = setup();
-    await run("emote add", { link: "https://7tv.app/emotes/e1" });
+    const { discord, openPreview, interact, run } = setup();
+    await interact((await openPreview()).id, { kind: "add" });
     const req = await run("emote remove", { name: "Pog" });
     expect(discord.emojis(S)).toEqual([]);
     expect(req.text).toContain("Removed Pog");
@@ -199,6 +331,9 @@ describe("registration", () => {
     expect(defs.map((d) => d.name).sort()).toEqual(["config", "emote", "set", "status", "sync", "trending"]);
     const emote = defs.find((d) => d.name === "emote")!;
     expect(emote.options?.map((o) => o.name)).toEqual(["add", "remove"]);
+    expect(emote.options?.find((o) => o.name === "add")?.options).toEqual([
+      expect.objectContaining({ name: "link", required: true }),
+    ]);
     for (const d of defs) expect(d.default_member_permissions).toBe("8");
   });
 });

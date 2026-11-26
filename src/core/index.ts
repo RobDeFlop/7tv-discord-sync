@@ -1,6 +1,7 @@
 import {
   DomainError,
   ServerQuotas,
+  type FeedbackMessage,
   type ServerId,
   type ServerStatus,
   type SyncResult,
@@ -9,8 +10,10 @@ import {
   type Quota,
 } from "../domain/index.ts";
 import type { DiscordPort, SevenTvPort, StorePort } from "../ports/index.ts";
+import type { PreparedEmoteAdd } from "./commands/add-emote-command.ts";
 import { LinkSourceSetCommand } from "./commands/link-source-set-command.ts";
 import type { Command } from "./commands/command.ts";
+import { ImageFailure } from "./image-failure.ts";
 import { SyncContext } from "./sync-context.ts";
 import type { SyncedServer } from "./synced-server.ts";
 
@@ -27,6 +30,14 @@ export class SyncCore {
   /** Validate a link before accepting a background sync; this does not mutate Server state. */
   public async prepareSourceLink(link: string): Promise<LinkSourceSetCommand> {
     return new LinkSourceSetCommand(await this.context.sevenTv.resolveUserLink(link));
+  }
+
+  /** Prepare the image for an emote preview without reading or modifying Server state. */
+  public async prepareEmoteAdd(link: string): Promise<PreparedEmoteAdd | { feedback: FeedbackMessage }> {
+    const emote = await this.context.sevenTv.resolveEmoteLink(link);
+    const result = await this.context.sevenTv.downloadImage(emote.id);
+    if (result.ok) return { emote, image: result.image };
+    return { feedback: { level: "error", text: `Could not preview this emote. ${new ImageFailure(emote, result.reason).text}` } };
   }
 
   /** Apply an admin command to a Server. Domain errors come back as feedback. */

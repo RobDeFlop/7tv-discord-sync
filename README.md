@@ -81,7 +81,7 @@ A typical first setup:
 
 | Command | What it does |
 | --- | --- |
-| `/emote add <link> [name]` | Add a 7TV emote (a Requested Emote) |
+| `/emote add <link>` | Preview a 7TV emote, then add it as a Requested Emote |
 | `/emote remove <name>` | Remove an emoji the bot created |
 | `/set link <7tv user link>` | Mirror that user's active emote set (Source Set) |
 | `/set unlink <delete\|keep>` | Stop mirroring; delete the emotes or keep them as Reserved Slots |
@@ -89,6 +89,8 @@ A typical first setup:
 | `/sync` | Sync now |
 | `/status` | Slot usage, settings, problems and pending Discord writes |
 | `/config log-channel <channel>` | Where automatic sync messages are posted |
+
+In the private emote preview, choose **Add** to use the displayed name, **Choose name** to edit the original 7TV name and add on submission, or **Cancel** to leave without adding anything. Names must be 2–32 characters and use only letters (A–Z), numbers, and underscores. If a name is already taken, the bot adds a numeric suffix. If the preview expires, run `/emote add` again.
 
 ### How slots are shared
 

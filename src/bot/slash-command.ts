@@ -2,7 +2,7 @@ import type { SyncCore, Command } from "../core/index.ts";
 import { DomainError, type ServerId } from "../domain/index.ts";
 import { FeedbackRouter } from "./feedback-router.ts";
 import type { ServerLock } from "./server-lock.ts";
-import type { SlashRequest } from "./slash-request.ts";
+import type { SlashReply, SlashRequest } from "./slash-request.ts";
 
 export interface SlashOption {
   name: string;
@@ -26,7 +26,7 @@ export abstract class SlashCommand {
 
   public constructor(
     protected readonly core: SyncCore,
-    private readonly lock: ServerLock,
+    protected readonly lock: ServerLock,
   ) {}
 
   public async handle(request: SlashRequest): Promise<void> {
@@ -44,8 +44,7 @@ export abstract class SlashCommand {
     }
   }
 
-  /** Do the work and return the reply text. */
-  protected abstract run(server: ServerId, request: SlashRequest): Promise<string>;
+  protected abstract run(server: ServerId, request: SlashRequest): Promise<SlashReply>;
 
   protected async apply(server: ServerId, command: Command): Promise<string> {
     return FeedbackRouter.format((await this.core.apply(server, command)).feedback);

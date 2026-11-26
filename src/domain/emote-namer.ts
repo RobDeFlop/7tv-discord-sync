@@ -2,6 +2,10 @@
 export class EmoteNamer {
   public static readonly MAX_LENGTH = 32;
 
+  public static isValid(name: string): boolean {
+    return name === EmoteNamer.sanitize(name);
+  }
+
   public static sanitize(raw: string): string {
     let name = raw.replace(/[^A-Za-z0-9_]/g, "_").slice(0, EmoteNamer.MAX_LENGTH);
     while (name.length < 2) name += "_";

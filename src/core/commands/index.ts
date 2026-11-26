@@ -1,5 +1,5 @@
 export { Command } from "./command.ts";
-export { AddEmoteCommand } from "./add-emote-command.ts";
+export { AddEmoteCommand, type PreparedEmoteAdd } from "./add-emote-command.ts";
 export { RemoveEmoteCommand } from "./remove-emote-command.ts";
 export { LinkSourceSetCommand } from "./link-source-set-command.ts";
 export { UnlinkSourceSetCommand } from "./unlink-source-set-command.ts";

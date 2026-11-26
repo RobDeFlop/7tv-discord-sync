@@ -8,6 +8,7 @@ import { SetUnlinkSlashCommand } from "./commands/set-unlink-slash-command.ts";
 import { StatusSlashCommand } from "./commands/status-slash-command.ts";
 import { SyncSlashCommand } from "./commands/sync-slash-command.ts";
 import { TrendingSlashCommand } from "./commands/trending-slash-command.ts";
+import type { EmoteAddInteraction } from "./emote-add-interaction.ts";
 import type { GatewayEvents } from "./gateway-events.ts";
 import type { ServerLock } from "./server-lock.ts";
 import type { SlashCommand, SlashOption } from "./slash-command.ts";
@@ -37,10 +38,12 @@ export class SlashCommandRegistry {
   private static readonly ANNOUNCEMENT_CHANNEL = 5;
 
   private readonly commands: ReadonlyMap<string, SlashCommand>;
+  private readonly emoteAdd: EmoteAddSlashCommand;
 
   public constructor(core: SyncCore, lock: ServerLock, events: GatewayEvents) {
+    this.emoteAdd = new EmoteAddSlashCommand(core, lock);
     const all: SlashCommand[] = [
-      new EmoteAddSlashCommand(core, lock),
+      this.emoteAdd,
       new EmoteRemoveSlashCommand(core, lock),
       new SetLinkSlashCommand(core, lock, events),
       new SetUnlinkSlashCommand(core, lock),
@@ -56,6 +59,10 @@ export class SlashCommandRegistry {
     const command = this.commands.get(request.commandPath);
     if (!command) return request.reply("Unknown command.");
     return command.handle(request);
+  }
+
+  public async handleEmoteAddInteraction(request: EmoteAddInteraction): Promise<void> {
+    return this.emoteAdd.handleInteraction(request);
   }
 
   /** Command definitions for Discord: "emote add" becomes subcommand `add` of `/emote`. Administrators only. */

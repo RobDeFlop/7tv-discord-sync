@@ -3,6 +3,7 @@ import {
   EmoteNamer,
   QuotaFullError,
   ServerQuotas,
+  type EmojiImage,
   type ManagedEmote,
   type ServerId,
   type SevenTvEmote,
@@ -16,17 +17,22 @@ import type { SyncContext } from "../sync-context.ts";
 import type { SyncedServer } from "../synced-server.ts";
 import { Command } from "./command.ts";
 
+export interface PreparedEmoteAdd {
+  emote: SevenTvEmote;
+  image: EmojiImage;
+}
+
 /** Add a 7TV emote as a Requested Emote. */
 export class AddEmoteCommand extends Command {
   public constructor(
-    private readonly link: string,
+    private readonly source: string | PreparedEmoteAdd,
     private readonly name?: string,
   ) {
     super();
   }
 
   public async execute(server: ServerId, context: SyncContext): Promise<SyncResult> {
-    const emote = await context.sevenTv.resolveEmoteLink(this.link);
+    const emote = typeof this.source === "string" ? await context.sevenTv.resolveEmoteLink(this.source) : this.source.emote;
     const synced = await context.load(server);
     try {
       const existing = synced.state.findManaged(emote.id);
@@ -69,9 +75,11 @@ export class AddEmoteCommand extends Command {
   private async addNew(context: SyncContext, synced: SyncedServer, emote: SevenTvEmote): Promise<SyncResult> {
     const { state } = synced;
     const quota = ServerQuotas.quotaOf(emote.animated);
-    const image = await context.sevenTv.downloadImage(emote.id);
-    if (!image.ok) {
-      const failure = new ImageFailure(emote, image.reason);
+    const result = typeof this.source === "string"
+      ? await context.sevenTv.downloadImage(emote.id)
+      : { ok: true as const, image: this.source.image };
+    if (!result.ok) {
+      const failure = new ImageFailure(emote, result.reason);
       state.recordProblem(failure.toProblem());
       return SyncReport.single("error", failure.text);
     }
@@ -83,7 +91,7 @@ export class AddEmoteCommand extends Command {
     const wanted = this.name ?? emote.name;
     let placed: Placement;
     try {
-      placed = await context.allocator.place(synced, report, plan, emote, image.image, "requested", wanted);
+      placed = await context.allocator.place(synced, report, plan, emote, result.image, "requested", wanted);
     } catch (error) {
       if (!(error instanceof DisplacementError)) throw error;
       report.say("error", error.toFeedback().text);
