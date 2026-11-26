@@ -1,29 +1,26 @@
-import type {
-  DiscordEmoji,
-  EmojiImage,
-  ServerId,
-  ServerQuotas,
-  ServerState,
-  SevenTvEmote,
-  SevenTvEmoteId,
-  SevenTvEmoteSet,
-  SevenTvSetId,
-  SevenTvUser,
-  SevenTvUserId,
-  TrendingPeriod,
-} from "../domain/index.ts";
-import { emptyServerState } from "../domain/index.ts";
 import {
   InvalidLinkError,
-  type DiscordPort,
+  ServerState,
+  type DiscordEmoji,
+  type EmojiImage,
+  type ServerId,
+  type ServerStateSnapshot,
+  type SevenTvEmote,
+  type SevenTvEmoteId,
+  type SevenTvEmoteSet,
+  type SevenTvSetId,
+  type SevenTvUser,
+  type SevenTvUserId,
+  type TrendingPeriod,
+} from "../domain/index.ts";
+import {
+  DiscordPort,
+  SevenTvPort,
+  StorePort,
   type ImageResult,
   type SevenTvChange,
-  type SevenTvPort,
-  type StorePort,
 } from "../ports/index.ts";
 
-/** Discord's emoji slots per quota by boost level. */
-export const SLOTS_BY_BOOST_LEVEL = [50, 100, 150, 250] as const;
 export const MAX_EMOJI_BYTES = 256 * 1024;
 
 interface FakeServer {
@@ -31,54 +28,49 @@ interface FakeServer {
   emojis: DiscordEmoji[];
 }
 
-export class FakeDiscord implements DiscordPort {
-  private servers = new Map<ServerId, FakeServer>();
+export class FakeDiscord extends DiscordPort {
+  private readonly servers = new Map<ServerId, FakeServer>();
   private nextId = 1;
   /** Image bytes by emoji id, to assert which 7TV image was uploaded. */
-  readonly images = new Map<string, EmojiImage>();
+  public readonly images = new Map<string, EmojiImage>();
 
-  addServer(id: ServerId, opts: { boostLevel?: number } = {}): void {
+  public addServer(id: ServerId, opts: { boostLevel?: number } = {}): void {
     this.servers.set(id, { boostLevel: opts.boostLevel ?? 0, emojis: [] });
   }
 
-  setBoostLevel(id: ServerId, boostLevel: number): void {
+  public setBoostLevel(id: ServerId, boostLevel: number): void {
     this.server(id).boostLevel = boostLevel;
   }
 
   /** Add an emoji as if an admin uploaded it by hand. Returns it. */
-  seedEmoji(id: ServerId, emoji: { name: string; animated: boolean }): DiscordEmoji {
+  public seedEmoji(id: ServerId, emoji: { name: string; animated: boolean }): DiscordEmoji {
     const created = { id: `emoji-${this.nextId++}`, ...emoji };
     this.server(id).emojis.push(created);
     return created;
   }
 
   /** Remove an emoji as if an admin deleted it by hand. */
-  removeEmojiByHand(id: ServerId, emojiId: string): void {
+  public removeEmojiByHand(id: ServerId, emojiId: string): void {
     const s = this.server(id);
     s.emojis = s.emojis.filter((e) => e.id !== emojiId);
   }
 
   /** Current emojis, for assertions. */
-  emojis(id: ServerId): DiscordEmoji[] {
+  public emojis(id: ServerId): DiscordEmoji[] {
     return this.server(id).emojis.map((e) => ({ ...e }));
   }
 
-  async getQuotas(id: ServerId): Promise<ServerQuotas> {
-    const level = this.server(id).boostLevel;
-    const limit = SLOTS_BY_BOOST_LEVEL[Math.min(level, 3)]!;
-    return { boostLevel: level, limits: { static: limit, animated: limit } };
+  public async getBoostLevel(id: ServerId): Promise<number> {
+    return this.server(id).boostLevel;
   }
 
-  async listEmojis(id: ServerId): Promise<DiscordEmoji[]> {
+  public async listEmojis(id: ServerId): Promise<DiscordEmoji[]> {
     return this.emojis(id);
   }
 
-  async createEmoji(
-    id: ServerId,
-    emoji: { name: string; image: EmojiImage },
-  ): Promise<DiscordEmoji> {
+  public async createEmoji(id: ServerId, emoji: { name: string; image: EmojiImage }): Promise<DiscordEmoji> {
     const s = this.server(id);
-    const limit = (await this.getQuotas(id)).limits[emoji.image.animated ? "animated" : "static"];
+    const limit = (await this.getQuotas(id)).limit(emoji.image.animated ? "animated" : "static");
     const used = s.emojis.filter((e) => e.animated === emoji.image.animated).length;
     if (used >= limit) throw new Error("Maximum number of emojis reached");
     if (!/^[A-Za-z0-9_]{2,32}$/.test(emoji.name)) throw new Error(`Invalid emoji name: ${emoji.name}`);
@@ -89,14 +81,14 @@ export class FakeDiscord implements DiscordPort {
     return created;
   }
 
-  async renameEmoji(id: ServerId, emojiId: string, name: string): Promise<void> {
+  public async renameEmoji(id: ServerId, emojiId: string, name: string): Promise<void> {
     const emoji = this.server(id).emojis.find((e) => e.id === emojiId);
     if (!emoji) throw new Error(`Unknown emoji ${emojiId}`);
     if (!/^[A-Za-z0-9_]{2,32}$/.test(name)) throw new Error(`Invalid emoji name: ${name}`);
     emoji.name = name;
   }
 
-  async deleteEmoji(id: ServerId, emojiId: string): Promise<void> {
+  public async deleteEmoji(id: ServerId, emojiId: string): Promise<void> {
     this.removeEmojiByHand(id, emojiId);
   }
 
@@ -107,21 +99,20 @@ export class FakeDiscord implements DiscordPort {
   }
 }
 
-export class FakeSevenTv implements SevenTvPort {
-  private emotes = new Map<SevenTvEmoteId, SevenTvEmote>();
-  private users = new Map<SevenTvUserId, SevenTvUser>();
-  private sets = new Map<SevenTvSetId, SevenTvEmoteSet>();
-  private trending = new Map<TrendingPeriod, SevenTvEmoteId[]>();
-  private imageSizes = new Map<SevenTvEmoteId, number>();
-  private listeners = new Set<(change: SevenTvChange) => void>();
+export class FakeSevenTv extends SevenTvPort {
+  private readonly emotes = new Map<SevenTvEmoteId, SevenTvEmote>();
+  private readonly users = new Map<SevenTvUserId, SevenTvUser>();
+  private readonly sets = new Map<SevenTvSetId, SevenTvEmoteSet>();
+  private readonly trending = new Map<TrendingPeriod, SevenTvEmoteId[]>();
+  private readonly imageSizes = new Map<SevenTvEmoteId, number>();
 
-  addEmote(emote: SevenTvEmote, opts: { imageBytes?: number } = {}): void {
+  public addEmote(emote: SevenTvEmote, opts: { imageBytes?: number } = {}): void {
     this.emotes.set(emote.id, emote);
     this.imageSizes.set(emote.id, opts.imageBytes ?? 1024);
   }
 
   /** Rename an emote everywhere on 7TV, including inside sets. */
-  renameEmote(id: SevenTvEmoteId, name: string): void {
+  public renameEmote(id: SevenTvEmoteId, name: string): void {
     const emote = this.emotes.get(id);
     if (!emote) throw new Error(`Unknown emote ${id}`);
     emote.name = name;
@@ -130,75 +121,70 @@ export class FakeSevenTv implements SevenTvPort {
     }
   }
 
-  addUser(user: SevenTvUser): void {
+  public addUser(user: SevenTvUser): void {
     this.users.set(user.id, user);
   }
 
   /** Create or replace a set. Emotes must already be registered with addEmote. */
-  setEmotes(setId: SevenTvSetId, name: string, emoteIds: SevenTvEmoteId[]): void {
+  public setEmotes(setId: SevenTvSetId, name: string, emoteIds: SevenTvEmoteId[]): void {
     this.sets.set(setId, { id: setId, name, emotes: emoteIds.map((id) => this.emote(id)) });
   }
 
-  setActiveSet(userId: SevenTvUserId, setId: SevenTvSetId | null): void {
+  public setActiveSet(userId: SevenTvUserId, setId: SevenTvSetId | null): void {
     const user = this.users.get(userId);
     if (!user) throw new Error(`Unknown user ${userId}`);
     user.activeSetId = setId;
   }
 
-  setTrending(period: TrendingPeriod, emoteIds: SevenTvEmoteId[]): void {
+  public setTrending(period: TrendingPeriod, emoteIds: SevenTvEmoteId[]): void {
     this.trending.set(period, emoteIds);
   }
 
   /** Make the next download of this emote report the given size. */
-  setImageSize(id: SevenTvEmoteId, bytes: number): void {
+  public setImageSize(id: SevenTvEmoteId, bytes: number): void {
     this.imageSizes.set(id, bytes);
   }
 
   /** Push a change event to subscribers, as the EventAPI would. */
-  emit(change: SevenTvChange): void {
-    for (const l of this.listeners) l(change);
+  public override emit(change: SevenTvChange): void {
+    super.emit(change);
   }
 
   /** Links look like https://7tv.app/emotes/<id> and https://7tv.app/users/<id>. */
-  async resolveEmoteLink(link: string): Promise<SevenTvEmote> {
+  public async resolveEmoteLink(link: string): Promise<SevenTvEmote> {
     const id = /^https:\/\/7tv\.app\/emotes\/([\w-]+)$/.exec(link)?.[1];
     const emote = id ? this.emotes.get(id) : undefined;
-    if (!emote) throw new InvalidLinkError(link);
+    if (!emote) throw new InvalidLinkError(link, "emote");
     return { ...emote };
   }
 
-  async resolveUserLink(link: string): Promise<SevenTvUser> {
+  public async resolveUserLink(link: string): Promise<SevenTvUser> {
     const id = /^https:\/\/7tv\.app\/users\/([\w-]+)$/.exec(link)?.[1];
     const user = id ? this.users.get(id) : undefined;
-    if (!user) throw new InvalidLinkError(link);
+    if (!user) throw new InvalidLinkError(link, "user");
     return { ...user };
   }
 
-  async getUser(id: SevenTvUserId): Promise<SevenTvUser | null> {
+  public async getUser(id: SevenTvUserId): Promise<SevenTvUser | null> {
     const user = this.users.get(id);
     return user ? { ...user } : null;
   }
 
-  async getSet(id: SevenTvSetId): Promise<SevenTvEmoteSet | null> {
+  public async getSet(id: SevenTvSetId): Promise<SevenTvEmoteSet | null> {
     const set = this.sets.get(id);
     return set ? { ...set, emotes: set.emotes.map((e) => ({ ...e })) } : null;
   }
 
-  async getTrending(period: TrendingPeriod, limit: number): Promise<SevenTvEmote[]> {
+  public async getTrending(period: TrendingPeriod, limit: number): Promise<SevenTvEmote[]> {
     return (this.trending.get(period) ?? []).slice(0, limit).map((id) => ({ ...this.emote(id) }));
   }
 
-  async downloadImage(id: SevenTvEmoteId): Promise<ImageResult> {
+  public async downloadImage(id: SevenTvEmoteId): Promise<ImageResult> {
     const emote = this.emotes.get(id);
     if (!emote) return { ok: false, reason: "unavailable" };
     const size = this.imageSizes.get(id) ?? 0;
     if (size > MAX_EMOJI_BYTES) return { ok: false, reason: "too-large" };
     return { ok: true, image: { bytes: new Uint8Array(size), animated: emote.animated } };
-  }
-
-  subscribe(listener: (change: SevenTvChange) => void): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
   }
 
   private emote(id: SevenTvEmoteId): SevenTvEmote {
@@ -208,23 +194,23 @@ export class FakeSevenTv implements SevenTvPort {
   }
 }
 
-export class FakeStore implements StorePort {
-  private states = new Map<ServerId, ServerState>();
+export class FakeStore extends StorePort {
+  private readonly snapshots = new Map<ServerId, ServerStateSnapshot>();
 
-  async load(server: ServerId): Promise<ServerState> {
-    const state = this.states.get(server);
-    return state ? structuredClone(state) : emptyServerState();
+  public async load(server: ServerId): Promise<ServerState> {
+    const snapshot = this.snapshots.get(server);
+    return snapshot ? ServerState.fromSnapshot(structuredClone(snapshot)) : ServerState.empty();
   }
 
-  async save(server: ServerId, state: ServerState): Promise<void> {
-    this.states.set(server, structuredClone(state));
+  public async save(server: ServerId, state: ServerState): Promise<void> {
+    this.snapshots.set(server, structuredClone(state.toSnapshot()));
   }
 
-  async listServers(): Promise<ServerId[]> {
-    return [...this.states.keys()];
+  public async listServers(): Promise<ServerId[]> {
+    return [...this.snapshots.keys()];
   }
 
-  async remove(server: ServerId): Promise<void> {
-    this.states.delete(server);
+  public async remove(server: ServerId): Promise<void> {
+    this.snapshots.delete(server);
   }
 }
