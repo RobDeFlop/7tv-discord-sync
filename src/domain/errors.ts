@@ -41,6 +41,18 @@ export class MissingPermissionError extends DomainError {
   }
 }
 
+/** Discord freed the slot but rejected the replacement upload. */
+export class DisplacementError extends DomainError {
+  public constructor(replacement: string, displaced: string, cause: unknown) {
+    super(`Could not add ${replacement}. ${displaced} was displaced; the next sync will refill the slot by Precedence.`, { cause });
+  }
+
+  public toFeedback(): FeedbackMessage {
+    const reason = this.cause instanceof DomainError ? " " + this.cause.toFeedback().text : "";
+    return { level: "error", text: this.message + reason };
+  }
+}
+
 /** No free slot in a quota and nothing of lower Precedence to displace. */
 export class QuotaFullError extends DomainError {
   public constructor(

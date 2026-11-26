@@ -70,6 +70,10 @@ export class FakeDiscord extends DiscordPort {
     this.createFailures.set(id, { remaining: successes, error });
   }
 
+  public allowCreates(id: ServerId): void {
+    this.createFailures.delete(id);
+  }
+
   private quotaLookupCount = 0;
 
   /** How often slot limits were looked up. */

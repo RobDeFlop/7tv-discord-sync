@@ -1,7 +1,9 @@
 import {
+  DisplacementError,
   EmoteNamer,
   ManagedEmote,
   ServerQuotas,
+  type DiscordEmoji,
   type EmojiImage,
   type ManagedTier,
   type Quota,
@@ -38,12 +40,21 @@ export class SlotAllocator {
     wantedName: string,
   ): Promise<Placement> {
     const { state } = synced;
+    let victim: DiscordEmoji | undefined;
     if (plan.displace) {
-      const victim = await synced.removeManaged(plan.displace, report, "displaced");
+      victim = await synced.removeManaged(plan.displace, report, "displaced");
       report.say("warning", `${victim.name} (${plan.displace.tier}) was removed to make room for ${emote.name}.`);
     }
     const { name, suffixed } = EmoteNamer.unique(wantedName, synced.emojiNames());
-    const created = await synced.createEmoji(name, image);
+    let created: DiscordEmoji;
+    try {
+      created = await synced.createEmoji(name, image);
+    } catch (cause) {
+      if (!victim || !plan.displace) throw cause;
+      const error = new DisplacementError(name, victim.name, cause);
+      state.recordProblem({ kind: "pending", sevenTvEmoteId: plan.displace.sevenTvEmoteId, message: error.message });
+      throw error;
+    }
     state.addManagedEmote(new ManagedEmote(created.id, emote.id, tier, ServerQuotas.quotaOf(emote.animated)));
     report.change({ type: "created", name, animated: emote.animated, sevenTvEmoteId: emote.id, tier });
     return { name, suffixed };
