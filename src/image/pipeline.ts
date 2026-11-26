@@ -9,7 +9,7 @@ export interface PrepareOptions {
 /**
  * Convert a downloaded 7TV image (AVIF, WebP, GIF, PNG, animated or not) to
  * what Discord accepts: PNG for static, GIF for animated, under the size limit.
- * Never returns an oversized file.
+ * If conversion cannot fit, return a still preview without an upload image.
  */
 export class ImagePipeline {
   public static readonly DISCORD_EMOJI_MAX_BYTES = 256 * 1024;
@@ -35,8 +35,13 @@ export class ImagePipeline {
       const bytes = animated
         ? await this.shrinkAnimated(input, meta, maxBytes)
         : await this.shrinkStatic(input, maxBytes);
-      if (!bytes) return { ok: false, reason: "too-large" };
-      return { ok: true, image: { bytes, animated } };
+      if (bytes) return { ok: true, image: { bytes, animated } };
+
+      const preview = await sharp(input, { page: 0 })
+        .resize(128, 128, { fit: "inside", withoutEnlargement: true })
+        .png()
+        .toBuffer();
+      return { ok: false, reason: "too-large", previewImage: { bytes: preview, animated: false } };
     } catch {
       return { ok: false, reason: "unavailable" };
     }

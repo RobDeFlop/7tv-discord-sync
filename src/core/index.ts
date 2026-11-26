@@ -1,9 +1,11 @@
 import {
   DomainError,
   ServerQuotas,
+  type EmojiImage,
   type FeedbackMessage,
   type ServerId,
   type ServerStatus,
+  type SevenTvEmote,
   type SyncResult,
   type Tier,
   type TierUsage,
@@ -19,6 +21,11 @@ import type { SyncedServer } from "./synced-server.ts";
 
 export * from "./commands/index.ts";
 
+type EmoteAddPreparation =
+  | PreparedEmoteAdd
+  | { emote: SevenTvEmote; image: EmojiImage; importFailure: "too-large" }
+  | { feedback: FeedbackMessage };
+
 /** The sync core's public interface. */
 export class SyncCore {
   private readonly context: SyncContext;
@@ -33,7 +40,7 @@ export class SyncCore {
   }
 
   /** Prepare an emote preview without saving state or changing any Discord emojis. */
-  public async prepareEmoteAdd(server: ServerId, link: string): Promise<PreparedEmoteAdd | { feedback: FeedbackMessage }> {
+  public async prepareEmoteAdd(server: ServerId, link: string): Promise<EmoteAddPreparation> {
     const emote = await this.context.sevenTv.resolveEmoteLink(link);
     const synced = await this.context.load(server);
     const managed = synced.state.findManaged(emote.id);
@@ -47,6 +54,7 @@ export class SyncCore {
         const image = await this.context.discord.downloadEmojiImage(server, existing);
         if (image) return { emote, image, defaultName: existing.name };
       }
+      if (result.reason === "too-large") return { emote, image: result.previewImage, importFailure: result.reason };
       return { feedback: { level: "error", text: `Could not preview this emote. ${new ImageFailure(emote, result.reason).text}` } };
     }
 

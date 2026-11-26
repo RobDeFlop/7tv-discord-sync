@@ -30,7 +30,7 @@ export interface SevenTvEmoteSet {
   emotes: SevenTvEmote[];
 }
 
-/** An image already converted and shrunk to what Discord accepts. */
+/** An image in Discord's emoji formats (PNG or GIF). */
 export interface EmojiImage {
   bytes: Uint8Array;
   animated: boolean;
@@ -87,10 +87,13 @@ export interface ServerStateSnapshot {
   extra?: Record<string, unknown>;
 }
 
+export type EmoteAddNameConflictReason = "emote-name-taken" | "emote-name-changed";
+
 /** A message for the admin; commands reply ephemerally, automatic syncs go to the log channel. */
 export interface FeedbackMessage {
   level: "info" | "warning" | "error";
   text: string;
+  reason?: EmoteAddNameConflictReason;
 }
 
 /** What a sync did to a Server's emojis. */

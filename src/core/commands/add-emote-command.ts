@@ -1,5 +1,6 @@
 import {
   DisplacementError,
+  EmoteAddNameConflictError,
   EmoteNamer,
   QuotaFullError,
   ServerQuotas,
@@ -25,11 +26,15 @@ export interface PreparedEmoteAdd {
 
 /** Add a 7TV emote as a Requested Emote. */
 export class AddEmoteCommand extends Command {
-  public constructor(
-    private readonly source: string | PreparedEmoteAdd,
-    private readonly name?: string,
-  ) {
+  private readonly source: string | PreparedEmoteAdd;
+
+  public constructor(source: string | PreparedEmoteAdd, private readonly name?: string) {
     super();
+    this.source = typeof source === "string" ? source : {
+      emote: { ...source.emote },
+      image: { animated: source.image.animated, bytes: new Uint8Array(source.image.bytes) },
+      defaultName: source.defaultName,
+    };
   }
 
   public async execute(server: ServerId, context: SyncContext): Promise<SyncResult> {
@@ -51,10 +56,8 @@ export class AddEmoteCommand extends Command {
     const emoji = synced.emojiOf(existing);
     const wanted = this.name ? EmoteNamer.unique(this.name, synced.emojiNamesExcept(emoji.id)) : undefined;
     if (typeof this.source !== "string") {
-      if (this.name && wanted?.suffixed) return AddEmoteCommand.nameTaken(this.name);
-      if (!this.name && emoji.name !== this.source.defaultName) {
-        return SyncReport.single("error", "The Discord emoji name changed. Run `/emote add` again to review the name.");
-      }
+      if (this.name && wanted?.suffixed) throw EmoteAddNameConflictError.taken(this.name);
+      if (!this.name && emoji.name !== this.source.defaultName) throw EmoteAddNameConflictError.changed();
     }
 
     const promoted = existing.tier !== "requested";
@@ -98,7 +101,7 @@ export class AddEmoteCommand extends Command {
     const requestedName = this.name ?? (typeof this.source === "string" ? undefined : this.source.defaultName);
     const wanted = requestedName ?? emote.name;
     if (typeof this.source !== "string" && context.allocator.placementName(synced, wanted, plan.displace).suffixed) {
-      return AddEmoteCommand.nameTaken(wanted);
+      throw EmoteAddNameConflictError.taken(wanted);
     }
 
     const report = new SyncReport();
@@ -119,9 +122,5 @@ export class AddEmoteCommand extends Command {
       report.say("info", `Added ${placed.name}.`);
     }
     return report.toResult();
-  }
-
-  private static nameTaken(name: string): SyncResult {
-    return SyncReport.single("error", `${name} is already in use. Run \`/emote add\` again and choose another name.`);
   }
 }

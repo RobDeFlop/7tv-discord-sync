@@ -90,7 +90,7 @@ A typical first setup:
 | `/status` | Slot usage, settings, problems and pending Discord writes |
 | `/config log-channel <channel>` | Where automatic sync messages are posted |
 
-In the private emote preview, choose **Add** to use the displayed name, **Choose name** to edit the original 7TV name and add on submission, or **Cancel** to leave without adding anything. Names must be 2–32 characters and use only letters (A–Z), numbers, and underscores. If a name is already taken, the bot adds a numeric suffix. If the preview expires, run `/emote add` again.
+In the private emote preview, choose **Add** to use the displayed name, **Choose name** to edit the original 7TV name and add on submission, or **Cancel** to leave without adding anything. Names must be 2–32 characters and use only letters (A–Z), numbers, and underscores. The suggested name may already include a numeric suffix. If your custom name is taken, or the displayed name becomes taken before confirmation, the bot rejects it rather than adding a suffix. If the preview expires, run `/emote add` again.
 
 ### How slots are shared
 

@@ -1,11 +1,12 @@
 import type { EmojiImage, ServerId } from "../domain/index.ts";
 
-export interface EmoteAddPreview {
-  id: string;
+export type EmoteAddPreview = {
   originalName: string;
-  defaultName: string;
   image: EmojiImage;
-}
+} & (
+  | { id: string; defaultName: string; importError?: never }
+  | { importError: string; id?: never; defaultName?: never }
+);
 
 export type EmoteAddAction = { kind: "add" | "name" | "cancel" } | { kind: "submit"; name: string };
 

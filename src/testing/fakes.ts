@@ -263,7 +263,9 @@ export class FakeSevenTv extends SevenTvPort {
     const emote = this.emotes.get(id);
     if (!emote || this.unavailableImages.has(id)) return { ok: false, reason: "unavailable" };
     const size = this.imageSizes.get(id) ?? 0;
-    if (size > MAX_EMOJI_BYTES) return { ok: false, reason: "too-large" };
+    if (size > MAX_EMOJI_BYTES) {
+      return { ok: false, reason: "too-large", previewImage: { bytes: new Uint8Array(1024), animated: false } };
+    }
     return { ok: true, image: { bytes: new Uint8Array(size), animated: emote.animated } };
   }
 

@@ -30,17 +30,22 @@ export class EmoteAddSlashCommand extends SlashCommand {
     const prepared = await this.core.prepareEmoteAdd(serverId, this.requiredString(request, "link"));
     if ("feedback" in prepared) return FeedbackRouter.format([prepared.feedback]);
 
+    const originalName = prepared.emote.name;
+    const image = { animated: prepared.image.animated, bytes: new Uint8Array(prepared.image.bytes) };
+    if ("importFailure" in prepared) {
+      return {
+        originalName,
+        image,
+        importError: "This emote cannot be imported: its converted image exceeds Discord's 256 KB emoji limit.",
+      };
+    }
+
     const id = crypto.randomUUID();
     const expiresAt = Date.now() + EmoteAddSlashCommand.PREVIEW_TTL_MS;
     const timer = setTimeout(() => this.pending.delete(id), EmoteAddSlashCommand.PREVIEW_TTL_MS);
     timer.unref();
     this.pending.set(id, { serverId, userId: request.userId, prepared, expiresAt, timer });
-    return {
-      id,
-      originalName: prepared.emote.name,
-      defaultName: prepared.defaultName,
-      image: { animated: prepared.image.animated, bytes: new Uint8Array(prepared.image.bytes) },
-    };
+    return { id, originalName, defaultName: prepared.defaultName, image };
   }
 
   public async handleInteraction(request: EmoteAddInteraction): Promise<void> {
@@ -66,7 +71,14 @@ export class EmoteAddSlashCommand extends SlashCommand {
     await request.defer();
     let reply: string;
     try {
-      reply = await this.lock.run(pending.serverId, () => this.apply(pending.serverId, new AddEmoteCommand(pending.prepared, name)));
+      const { feedback } = await this.lock.run(pending.serverId, () =>
+        this.core.apply(pending.serverId, new AddEmoteCommand(pending.prepared, name)),
+      );
+      reply = FeedbackRouter.format(feedback.map((message) => {
+        const nextStep = message.reason === "emote-name-taken" ? "and choose another name."
+          : message.reason === "emote-name-changed" ? "to review the name." : null;
+        return nextStep ? { ...message, text: `${message.text} Run \`/emote add\` again ${nextStep}` } : message;
+      }));
     } catch (error) {
       console.error(`/emote add confirmation failed in ${pending.serverId}:`, error);
       reply = "Something went wrong. Run `/emote add` again to retry.";

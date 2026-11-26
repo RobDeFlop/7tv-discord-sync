@@ -51,6 +51,11 @@ export class DiscordJsEmoteAddInteraction extends EmoteAddInteraction {
       .setTitle("7TV emote preview")
       .setImage(`attachment://${filename}`)
       .addFields({ name: "Original 7TV name", value: escapeMarkdown(preview.originalName) });
+    const reply = { embeds: [embed], files: [{ attachment: Buffer.from(preview.image.bytes), name: filename }] };
+    if (preview.importError !== undefined) {
+      embed.setDescription(preview.importError);
+      return reply;
+    }
     if (preview.defaultName !== preview.originalName) {
       embed.addFields({ name: "Add as", value: escapeMarkdown(preview.defaultName) });
     }
@@ -59,7 +64,7 @@ export class DiscordJsEmoteAddInteraction extends EmoteAddInteraction {
       new ButtonBuilder().setCustomId(this.customId(preview.id, "name")).setLabel("Choose name").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(this.customId(preview.id, "cancel")).setLabel("Cancel").setStyle(ButtonStyle.Secondary),
     );
-    return { embeds: [embed], files: [{ attachment: Buffer.from(preview.image.bytes), name: filename }], components: [buttons] };
+    return { ...reply, components: [buttons] };
   }
 
   public get serverId(): ServerId | null {

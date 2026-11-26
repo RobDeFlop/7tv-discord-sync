@@ -83,9 +83,17 @@ describe("ImagePipeline", () => {
     expect(result.image.animated).toBe(true);
   });
 
-  test("reports too-large when it cannot fit under the limit", async () => {
-    const result = await new ImagePipeline({ maxBytes: 100 }).prepare(await staticFixture(200, "png"));
-    expect(result).toEqual({ ok: false, reason: "too-large" });
+  test.each(["static", "animated"] as const)("provides a still preview, not an upload image, when %s cannot fit", async (kind) => {
+    const input = kind === "static" ? await staticFixture(200, "png") : await animatedFixture(128, 2);
+    const result = await new ImagePipeline({ maxBytes: 100 }).prepare(input);
+    if (result.ok || result.reason !== "too-large") throw new Error("Expected a too-large image result");
+    expect(result).not.toHaveProperty("image");
+    expect(result.previewImage.animated).toBe(false);
+    expect(result.previewImage.bytes.byteLength).toBeLessThan(LIMIT);
+    const meta = await sharp(result.previewImage.bytes).metadata();
+    expect(meta.format).toBe("png");
+    expect(meta.pages ?? 1).toBe(1);
+    expect(meta.width).toBe(128);
   });
 
   test("reports unavailable for bytes that are not an image", async () => {

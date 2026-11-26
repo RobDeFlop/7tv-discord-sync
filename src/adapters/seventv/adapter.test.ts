@@ -153,15 +153,15 @@ describe("downloadImage", () => {
     expect(await adapter.downloadImage(fx.EMOTE_ID)).toEqual({ ok: false, reason: "unavailable" });
   });
 
-  test("passes through the pipeline's too-large verdict", async () => {
-    const { calls: _c } = setup({});
+  test("passes through the pipeline's too-large verdict and preview image", async () => {
     const fetchFn = (async (u: string) =>
       u.includes("cdn") ? new Response(bytes) : Response.json(fx.animatedEmote)) as unknown as typeof fetch;
-    const adapter = new SevenTvAdapter(new FakeImagePipeline({ ok: false, reason: "too-large" }), {
+    const failure = { ok: false, reason: "too-large", previewImage: { bytes, animated: false } } as const;
+    const adapter = new SevenTvAdapter(new FakeImagePipeline(failure), {
       fetch: fetchFn,
       enableEvents: false,
       pollIntervalMs: 0,
     });
-    expect(await adapter.downloadImage(fx.EMOTE_ID)).toEqual({ ok: false, reason: "too-large" });
+    expect(await adapter.downloadImage(fx.EMOTE_ID)).toEqual(failure);
   });
 });

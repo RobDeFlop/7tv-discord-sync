@@ -47,6 +47,24 @@ test("the deferred private slash reply renders the image, names, and confirmatio
   } as unknown as Interaction)?.action.kind)).toEqual(["add", "name", "cancel"]);
 });
 
+test("an oversized preview renders its image and explanation without confirmation controls", () => {
+  const importError = "This emote cannot be imported.";
+  const reply = DiscordJsEmoteAddInteraction.previewReply({
+    originalName: preview.originalName,
+    image: { ...preview.image, animated: false },
+    importError,
+  });
+  expect(reply.files).toEqual([{ name: "preview.png", attachment: Buffer.from(preview.image.bytes) }]);
+  expect(reply.components).toBeUndefined();
+  const embed = reply.embeds?.[0];
+  if (!(embed instanceof EmbedBuilder)) throw new Error("Expected an emote preview embed");
+  expect(embed.toJSON()).toMatchObject({
+    description: importError,
+    image: { url: "attachment://preview.png" },
+    fields: [{ name: "Original 7TV name", value: preview.originalName }],
+  });
+});
+
 test("the Choose name button opens a prefilled modal, and its submission routes to the same preview", async () => {
   const row = DiscordJsEmoteAddInteraction.previewReply(preview).components?.[0];
   if (!(row instanceof ActionRowBuilder)) throw new Error("Expected emote preview buttons");

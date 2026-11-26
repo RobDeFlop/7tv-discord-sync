@@ -1,4 +1,4 @@
-import type { FeedbackMessage } from "./types.ts";
+import type { EmoteAddNameConflictReason, FeedbackMessage } from "./types.ts";
 import type { Quota } from "./quota.ts";
 
 /** An error the core turns into admin feedback instead of crashing. */
@@ -50,6 +50,25 @@ export class DisplacementError extends DomainError {
   public toFeedback(): FeedbackMessage {
     const reason = this.cause instanceof DomainError ? " " + this.cause.toFeedback().text : "";
     return { level: "error", text: this.message + reason };
+  }
+}
+
+/** The name confirmed from an emote preview cannot be applied as shown. */
+export class EmoteAddNameConflictError extends DomainError {
+  private constructor(private readonly reason: EmoteAddNameConflictReason, text: string) {
+    super(text);
+  }
+
+  public static taken(name: string): EmoteAddNameConflictError {
+    return new EmoteAddNameConflictError("emote-name-taken", `${name} is already in use.`);
+  }
+
+  public static changed(): EmoteAddNameConflictError {
+    return new EmoteAddNameConflictError("emote-name-changed", "The Discord emoji name changed.");
+  }
+
+  public toFeedback(): FeedbackMessage {
+    return { level: "error", text: this.message, reason: this.reason };
   }
 }
 

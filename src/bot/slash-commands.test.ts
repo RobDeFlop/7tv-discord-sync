@@ -1,7 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { SyncCore } from "../core/index.ts";
 import type { ServerId } from "../domain/index.ts";
-import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
+import { FakeDiscord, FakeSevenTv, FakeStore, MAX_EMOJI_BYTES } from "../testing/fakes.ts";
 import { EmoteAddInteraction, type EmoteAddAction, type EmoteAddPreview } from "./emote-add-interaction.ts";
 import { FeedbackRouter } from "./feedback-router.ts";
 import { GatewayEvents } from "./gateway-events.ts";
@@ -99,8 +99,9 @@ function setup() {
     return req;
   };
   const openPreview = async () => {
-    const request = await run("emote add", { link: EMOTE_LINK });
-    return request.preview!;
+    const { preview } = await run("emote add", { link: EMOTE_LINK });
+    if (preview?.id === undefined) throw new Error("Expected an importable emote preview");
+    return preview;
   };
   const interact = async (id: string, action: EmoteAddAction) => {
     const request = new FakeEmoteAddInteraction(id, action);
@@ -332,6 +333,23 @@ describe("/emote add preview", () => {
     expect(noLongerAdmin.text).toContain("Administrator");
     expect(discord.emojis(S)).toEqual([]);
     expect((await interact(id, { kind: "add" })).text).toContain("Added Pog");
+  });
+
+  test("oversized images still show a preview and cannot be imported or write status", async () => {
+    const { discord, sevenTv, store, run } = setup();
+    sevenTv.renameEmote("e1", "Original Name");
+    sevenTv.setImageSize("e1", MAX_EMOJI_BYTES + 1);
+
+    const request = await run("emote add", { link: EMOTE_LINK });
+
+    expect(request.deferred).toBe(true);
+    expect(request.preview?.originalName).toBe("Original Name");
+    expect(request.preview?.image.bytes.byteLength).toBeGreaterThan(0);
+    expect(request.preview?.importError).toContain("cannot be imported");
+    expect(request.preview?.importError).toContain("256 KB");
+    expect(request.preview?.id).toBeUndefined();
+    expect(discord.emojis(S)).toEqual([]);
+    expect(await store.listServers()).toEqual([]);
   });
 
   test("reports bad links and failed downloads without opening a preview or writing state", async () => {
