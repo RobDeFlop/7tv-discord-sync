@@ -1,4 +1,4 @@
-import type { SyncCore } from "../core/index.ts";
+import type { LinkSourceSetCommand, SyncCore } from "../core/index.ts";
 import type { ServerId } from "../domain/index.ts";
 import type { SevenTvChange, SevenTvPort, StorePort } from "../ports/index.ts";
 import type { FeedbackRouter } from "./feedback-router.ts";
@@ -23,6 +23,11 @@ export class GatewayEvents {
     private readonly lock: ServerLock,
     private readonly servers: ServerDirectory,
   ) {}
+
+  /** Accept a slash command without keeping its interaction open during Discord writes. */
+  public requestSync(server: ServerId, link?: LinkSourceSetCommand): void {
+    void this.track(this.lock.run(server, () => this.sync(server, true, link)));
+  }
 
   /** The bot was added to a Server; reconcile registers its hand-made emojis as Reserved Slots. */
   public serverJoined(server: ServerId): Promise<void> {
@@ -79,12 +84,24 @@ export class GatewayEvents {
 
   private reconcile(server: ServerId): Promise<void> {
     const work = this.lock
-      .coalesce(server, async () => {
-        const result = await this.core.reconcile(server);
-        await this.feedback.deliver(server, result);
-      })
+      .coalesce(server, () => this.sync(server, false))
       .catch((e) => this.report(server, e));
     return this.track(work);
+  }
+
+  private async sync(server: ServerId, requested: boolean, link?: LinkSourceSetCommand): Promise<void> {
+    try {
+      const result = link ? await this.core.apply(server, link) : await this.core.reconcile(server);
+      if (requested && !result.feedback.some((message) => message.level === "error")) {
+        result.feedback.push({ level: "info", text: `Sync complete: ${result.changes.length} emoji changes.` });
+      }
+      await this.feedback.deliver(server, result);
+    } catch (error) {
+      this.report(server, error);
+      await this.feedback.deliver(server, {
+        changes: [], feedback: [{ level: "error", text: "Sync failed. Try /sync again in a moment." }],
+      });
+    }
   }
 
   private track(work: Promise<void>): Promise<void> {
