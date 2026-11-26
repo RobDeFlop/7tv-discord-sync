@@ -1,6 +1,7 @@
 import {
   MessageFlags,
   PermissionFlagsBits,
+  type APIEmbed,
   type ChatInputCommandInteraction,
   type Client,
   type Interaction,
@@ -55,7 +56,7 @@ export class DiscordJsSlashRequest extends SlashRequest {
   public async reply(reply: SlashReply): Promise<void> {
     const options = typeof reply === "string"
       ? { content: reply.slice(0, DiscordJsSlashRequest.MAX_MESSAGE) }
-      : DiscordJsEmoteAddInteraction.previewReply(reply);
+      : "originalName" in reply ? DiscordJsEmoteAddInteraction.previewReply(reply) : { embeds: [reply] };
     if (this.interaction.deferred && !this.replied) await this.interaction.editReply(options);
     else if (this.replied || this.interaction.replied) await this.interaction.followUp({ ...options, flags: MessageFlags.Ephemeral });
     else await this.interaction.reply({ ...options, flags: MessageFlags.Ephemeral });
@@ -64,16 +65,25 @@ export class DiscordJsSlashRequest extends SlashRequest {
 }
 
 class DiscordJsLogChannel extends LogChannel {
-  private static readonly MAX_MESSAGE = 2000;
-
   public constructor(private readonly client: Client) {
     super();
   }
 
-  public async send(channelId: string, text: string): Promise<void> {
+  public async hasEmbedLinks(channelId: string): Promise<boolean | null> {
+    try {
+      const channel = await this.client.channels.fetch(channelId);
+      if (!channel?.isSendable() || channel.isDMBased()) return null;
+      const botMember = await channel.guild.members.fetchMe();
+      return channel.permissionsFor(botMember)?.has(PermissionFlagsBits.EmbedLinks) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  public async send(channelId: string, embeds: ReadonlyArray<APIEmbed>): Promise<void> {
     const channel = await this.client.channels.fetch(channelId);
     if (!channel?.isSendable()) throw new Error(`Channel ${channelId} cannot be written to`);
-    await channel.send({ content: text.slice(0, DiscordJsLogChannel.MAX_MESSAGE), allowedMentions: { parse: [] } });
+    await channel.send({ embeds: [...embeds], allowedMentions: { parse: [] } });
   }
 
   public static of(client: Client): LogChannel {

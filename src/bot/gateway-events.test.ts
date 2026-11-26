@@ -70,7 +70,8 @@ describe("server events", () => {
       sevenTv.setEmotes("setA", "A", ["e1", "e2"]);
       discord.failCreatesAfter(A, 0, new RateLimitError(2_000));
       await events.emojiChanged(A);
-      expect(log.sent[0]?.text).toMatch(/paused.*resume/i);
+      expect(log.sent[0]?.embeds[0]?.title).toBe("Sync warnings");
+      expect(log.sent[0]?.embeds[0]?.description).toMatch(/paused.*resume/i);
       await events.boostChanged(A);
       jest.advanceTimersByTime(2_000);
       await events.idle();
@@ -178,11 +179,13 @@ describe("feedback routing", () => {
     discord.revokeManageExpressions(A);
     discord.seedEmoji(A, { name: "x", animated: false });
     await core.apply(A, new LinkSourceSetCommand("https://7tv.app/users/u1")); // no permission, feedback ignored here
-    log.sent.length = 0;
+    expect(log.sent).toEqual([]);
     await events.emojiChanged(A);
     expect(log.sent).toHaveLength(1);
     expect(log.sent[0]!.channelId).toBe("chan-1");
-    expect(log.sent[0]!.text).toContain("Manage Expressions");
+    expect(log.sent[0]!.embeds).toEqual([
+      { title: "Sync errors", description: expect.stringContaining("Manage Expressions") },
+    ]);
   });
 
   test("without a log channel nothing is sent", async () => {

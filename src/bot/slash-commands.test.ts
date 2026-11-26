@@ -14,9 +14,8 @@ const S = "server-1";
 const EMOTE_LINK = "https://7tv.app/emotes/e1";
 
 class FakeRequest extends SlashRequest {
-  public readonly replies: string[] = [];
+  private readonly replyHistory: SlashReply[] = [];
   public deferred = false;
-  public preview?: EmoteAddPreview;
   public readonly userId = "admin";
 
   public constructor(
@@ -43,12 +42,19 @@ class FakeRequest extends SlashRequest {
   }
 
   public async reply(reply: SlashReply): Promise<void> {
-    if (typeof reply === "string") this.replies.push(reply);
-    else this.preview = reply;
+    this.replyHistory.push(structuredClone(reply));
+  }
+
+  public get replies(): ReadonlyArray<SlashReply> {
+    return structuredClone(this.replyHistory);
+  }
+
+  public get preview(): EmoteAddPreview | undefined {
+    return this.replies.find((reply) => typeof reply !== "string" && "originalName" in reply);
   }
 
   public get text(): string {
-    return this.replies.join("\n");
+    return this.replyHistory.filter((reply) => typeof reply === "string").join("\n");
   }
 }
 
@@ -80,6 +86,25 @@ class FakeEmoteAddInteraction extends EmoteAddInteraction {
   }
 }
 
+test("FakeRequest snapshots embed replies and returns independent copies", async () => {
+  const req = new FakeRequest("sync");
+  const embed = { title: "Sync queued", footer: { text: "Check status" } };
+  await req.reply(embed);
+
+  embed.title = "Changed input";
+  embed.footer.text = "Changed input footer";
+  const expected = [{ title: "Sync queued", footer: { text: "Check status" } }];
+  const replies = req.replies;
+  expect(replies).toEqual(expected);
+
+  const recordedEmbed = replies[0];
+  if (!recordedEmbed || typeof recordedEmbed === "string" || "originalName" in recordedEmbed) {
+    throw new Error("Expected an embed reply");
+  }
+  recordedEmbed.footer!.text = "Changed returned footer";
+  expect(req.replies).toEqual(expected);
+});
+
 function setup() {
   const discord = new FakeDiscord();
   discord.addServer(S);
@@ -92,7 +117,7 @@ function setup() {
   const lock = new ServerLock();
   const log = new FakeLogChannel();
   const events = new GatewayEvents(core, store, new FeedbackRouter(store, log), lock, new FakeServers());
-  const registry = new SlashCommandRegistry(core, lock, events);
+  const registry = new SlashCommandRegistry(core, lock, events, log);
   const run = async (path: string, options: Record<string, string | boolean> = {}) => {
     const req = new FakeRequest(path, options);
     await registry.handle(req);
@@ -127,7 +152,7 @@ describe("access", () => {
     expect(req.text).toContain("Server");
   });
 
-  test("replies are deferred first, since syncing takes longer than Discord waits", async () => {
+  test("/sync acknowledges the interaction before replying", async () => {
     const { run } = setup();
     expect((await run("sync")).deferred).toBe(true);
   });
@@ -516,7 +541,7 @@ describe("commands translate to core calls", () => {
     expect((await run("set link", { link: "nope" })).text).toContain("not a valid 7TV");
     expect((await run("set link", { link: "https://7tv.app/users/u1" })).text).toContain("queued");
     await events.idle();
-    expect(log.sent[0]?.text).toContain("Linked streamer");
+    expect(log.sent[0]?.embeds[0]?.description).toContain("Linked streamer");
     expect(discord.emojis(S).map((e) => e.name)).toEqual(["Pog"]);
     await run("set unlink", { emotes: "delete" });
     expect(discord.emojis(S)).toEqual([]);
@@ -536,7 +561,8 @@ describe("commands translate to core calls", () => {
   });
 
   test("status, sync and set link reply while a Server write is blocked", async () => {
-    const { lock, discord, run } = setup();
+    const { lock, discord, events, log, run } = setup();
+    await run("config log-channel", { channel: "log" });
     const gate = Promise.withResolvers<void>();
     const busy = lock.run(S, () => gate.promise);
     try {
@@ -546,27 +572,56 @@ describe("commands translate to core calls", () => {
       ]);
       const replies = await Promise.race([requests, Bun.sleep(150).then(() => null)]);
       expect(replies?.[0]?.text).toContain("1 write pending");
-      expect(replies?.[1]?.text).toContain("queued");
+      expect(replies?.[1]?.replies).toEqual([{
+        title: "Sync queued",
+        description: "Check `/status` for pending writes or the configured log channel for results.",
+      }]);
       expect(replies?.[2]?.text).toContain("queued");
       expect(discord.emojis(S)).toEqual([]);
+      expect(log.sent).toEqual([]);
     } finally {
       gate.resolve();
       await busy;
+      await events.idle();
     }
   });
 
-  test("/sync reconciles and reports", async () => {
-    const { discord, run, events, log } = setup();
-    await run("config log-channel", { channel: "log" });
-    discord.seedEmoji(S, { name: "hand", animated: false });
-    expect((await run("sync")).replies).toHaveLength(1);
+  test("/sync posts its results and warnings to the configured log channel", async () => {
+    const { sevenTv, run, events, log } = setup();
+    await run("set link", { link: "https://7tv.app/users/u1" });
     await events.idle();
-    expect(log.sent[0]?.text).toContain("Sync complete");
+    sevenTv.addEmote({ id: "e2", name: "Big", animated: false });
+    sevenTv.setImageSize("e2", 10 * 1024 * 1024);
+    sevenTv.setEmotes("setA", "A", ["e1", "e2"]);
+    await run("config log-channel", { channel: "log" });
+    await run("sync");
+    await events.idle();
+    expect(log.sent).toEqual([{
+      channelId: "log",
+      embeds: [
+        { title: "Sync results", description: "Sync complete: 0 emoji changes." },
+        { title: "Sync warnings", description: "Big is still over 256 KB after conversion and was skipped." },
+      ],
+    }]);
   });
 
-  test("/config log-channel stores the channel", async () => {
+  test("without a log channel a /sync problem is recorded for /status but not posted", async () => {
+    const { sevenTv, run, events, log } = setup();
+    await run("set link", { link: "https://7tv.app/users/u1" });
+    await events.idle();
+    sevenTv.addEmote({ id: "e2", name: "Big", animated: false });
+    sevenTv.disableDownload("e2");
+    sevenTv.setEmotes("setA", "A", ["e1", "e2"]);
+    await run("sync");
+    await events.idle();
+    expect(log.sent).toEqual([]);
+    expect((await run("status")).text).toContain("Problems:\n- Big could not be downloaded from 7TV.");
+  });
+
+  test("/config log-channel stores the channel and confirms with text", async () => {
     const { core, run } = setup();
-    await run("config log-channel", { channel: "chan-9" });
+    const req = await run("config log-channel", { channel: "chan-9" });
+    expect(req.replies).toEqual(["Log channel updated."]);
     expect((await core.status(S)).logChannelId).toBe("chan-9");
   });
 
