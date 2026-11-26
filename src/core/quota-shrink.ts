@@ -13,9 +13,9 @@ import type { SyncedServer } from "./synced-server.ts";
 export class QuotaShrink extends ReconcileStep {
   public async run(synced: SyncedServer): Promise<SyncResult> {
     const report = new SyncReport();
-    const quotas = await this.context.discord.getQuotas(synced.id);
+    const quotas = await synced.quotas();
     for (const quota of ServerQuotas.ALL) {
-      await this.shrink(synced, report, quota, synced.usedIn(quota) - quotas.limit(quota));
+      await this.shrink(synced, report, quota, synced.usedIn(quota) - quotas.limit());
     }
     return report.toResult();
   }

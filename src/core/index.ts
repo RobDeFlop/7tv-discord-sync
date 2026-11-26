@@ -41,9 +41,10 @@ export class SyncCore {
   /** Used/free slots per quota and tier, plus problems. */
   public async status(server: ServerId): Promise<ServerStatus> {
     const synced = await this.context.load(server);
-    const quotas = await this.context.discord.getQuotas(server);
+    const quotas = await synced.quotas();
     const { state } = synced;
     return {
+      manageExpressions: await this.context.discord.hasManageExpressions(server),
       writeQueue: this.context.discord.queueProgress(server),
       quotas: {
         static: this.usage(synced, "static", quotas),
@@ -63,7 +64,7 @@ export class SyncCore {
     for (const e of inQuota) byTier[tierOf.get(e.id) ?? "reserved"]++;
     return {
       used: inQuota.length,
-      free: Math.max(0, quotas.limit(quota) - inQuota.length),
+      free: Math.max(0, quotas.limit() - inQuota.length),
       byTier,
     };
   }

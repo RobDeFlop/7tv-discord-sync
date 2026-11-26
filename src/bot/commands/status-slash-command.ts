@@ -13,6 +13,7 @@ export class StatusSlashCommand extends SlashCommand {
 
   private static render(status: ServerStatus, now: number): string {
     const lines = [
+      ...(status.manageExpressions ? [] : ["Error: I am missing the Manage Expressions permission, so I cannot change emojis."]),
       StatusSlashCommand.usage("Static", status.quotas.static),
       StatusSlashCommand.usage("Animated", status.quotas.animated),
       `Linked 7TV user: ${status.linkedUserId ?? "none"}`,

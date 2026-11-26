@@ -3,6 +3,8 @@ import { ServerQuotas, type DiscordEmoji, type EmojiImage, type ServerId, type W
 export abstract class DiscordPort {
   /** The Server's current boost level (0 to 3). */
   public abstract getBoostLevel(server: ServerId): Promise<number>;
+  /** Whether the bot holds Manage Expressions on the Server, i.e. may add, rename and remove emojis. */
+  public abstract hasManageExpressions(server: ServerId): Promise<boolean>;
   public abstract listEmojis(server: ServerId): Promise<DiscordEmoji[]>;
   public abstract createEmoji(server: ServerId, emoji: { name: string; image: EmojiImage }): Promise<DiscordEmoji>;
   public abstract renameEmoji(server: ServerId, emojiId: string, name: string): Promise<void>;

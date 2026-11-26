@@ -19,7 +19,7 @@ export class TrendingSlashCommand extends SlashCommand {
 
   protected run(server: ServerId, request: SlashRequest): Promise<string> {
     const enabled = this.requiredString(request, "state") === "on";
-    const period = (request.string("period") ?? undefined) as TrendingPeriod | undefined;
+    const period = (request.stringOption("period") ?? undefined) as TrendingPeriod | undefined;
     return this.apply(server, new SetTrendingCommand(enabled, period));
   }
 }
