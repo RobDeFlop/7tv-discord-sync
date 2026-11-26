@@ -6,7 +6,7 @@ import {
 } from "discord.js";
 import type { ServerId } from "../domain/index.ts";
 import { LogChannel } from "./feedback-router.ts";
-import { GuildDirectory, type GatewayEvents } from "./gateway-events.ts";
+import { ServerDirectory, type GatewayEvents } from "./gateway-events.ts";
 import type { SlashCommandRegistry } from "./slash-command-registry.ts";
 import { SlashRequest } from "./slash-request.ts";
 
@@ -32,12 +32,12 @@ export class DiscordJsSlashRequest extends SlashRequest {
     return this.interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
   }
 
-  public string(name: string): string | null {
+  public stringOption(name: string): string | null {
     const value = this.interaction.options.get(name)?.value;
     return typeof value === "string" ? value : null;
   }
 
-  public boolean(name: string): boolean | null {
+  public booleanOption(name: string): boolean | null {
     const value = this.interaction.options.get(name)?.value;
     return typeof value === "boolean" ? value : null;
   }
@@ -73,12 +73,12 @@ class DiscordJsLogChannel extends LogChannel {
   }
 }
 
-class DiscordJsGuilds extends GuildDirectory {
+class DiscordJsServers extends ServerDirectory {
   public constructor(private readonly client: Client) {
     super();
   }
 
-  public guildIds(): ServerId[] {
+  public serverIds(): ServerId[] {
     return [...this.client.guilds.cache.keys()];
   }
 }
@@ -95,8 +95,8 @@ export class DiscordBot {
     return DiscordJsLogChannel.of(client);
   }
 
-  public static guilds(client: Client): GuildDirectory {
-    return new DiscordJsGuilds(client);
+  public static servers(client: Client): ServerDirectory {
+    return new DiscordJsServers(client);
   }
 
   /** Log in, register the slash commands, and catch up every Server. */
@@ -112,8 +112,8 @@ export class DiscordBot {
   private listen(): void {
     const c = this.client;
     c.once("clientReady", () => void this.onReady());
-    c.on("guildCreate", (guild) => void this.events.guildJoined(guild.id));
-    c.on("guildDelete", (guild) => void this.events.guildLeft(guild.id));
+    c.on("guildCreate", (guild) => void this.events.serverJoined(guild.id));
+    c.on("guildDelete", (guild) => void this.events.serverLeft(guild.id));
     c.on("emojiCreate", (emoji) => void this.events.emojiChanged(emoji.guild.id));
     c.on("emojiDelete", (emoji) => void this.events.emojiChanged(emoji.guild.id));
     c.on("emojiUpdate", (_old, emoji) => void this.events.emojiChanged(emoji.guild.id));

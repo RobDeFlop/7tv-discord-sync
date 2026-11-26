@@ -48,7 +48,7 @@ export abstract class SlashCommand {
   }
 
   protected requiredString(request: SlashRequest, name: string): string {
-    const value = request.string(name);
+    const value = request.stringOption(name);
     if (value === null) throw new Error(`Missing option ${name}`);
     return value;
   }

@@ -21,7 +21,7 @@ export interface Placement {
 export class SlotAllocator {
   public async plan(synced: SyncedServer, quota: Quota, tier: ManagedTier): Promise<SlotPlan> {
     const quotas = await synced.quotas();
-    return synced.state.planSlot(quota, tier, synced.usedIn(quota), quotas.limit(quota));
+    return synced.state.planSlot(quota, tier, synced.usedIn(quota), quotas.limit());
   }
 
   /**

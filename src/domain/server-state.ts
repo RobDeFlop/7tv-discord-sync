@@ -126,9 +126,18 @@ export class ServerState {
     this.managed = this.managed.filter((m) => m !== emote);
   }
 
-  /** Kept Managed Emotes simply stop being managed; ownership sync turns them into Reserved Slots. */
-  public releaseManagedOfTier(tier: ManagedTier): void {
-    this.managed = this.managed.filter((m) => m.tier !== tier);
+  /**
+   * Unlink the 7TV user and stop managing the Source Set's emotes. With `keepAsReserved` their
+   * emojis stay and become Reserved Slots; otherwise the caller deletes the emojis. Returns the
+   * emotes that were released.
+   */
+  public unlinkSource(keepAsReserved: boolean): ManagedEmote[] {
+    const released = this.managedOfTier("source");
+    this.managed = this.managed.filter((m) => m.tier !== "source");
+    if (keepAsReserved) this.reserved.push(...released.map((m) => new ReservedSlot(m.discordEmojiId, m.quota)));
+    this.linkedUser = null;
+    this.clearPending();
+    return released;
   }
 
   public addRequestedEmote(request: RequestedEmote): void {
@@ -141,10 +150,6 @@ export class ServerState {
 
   public linkUser(userId: SevenTvUserId): void {
     this.linkedUser = userId;
-  }
-
-  public unlinkUser(): void {
-    this.linkedUser = null;
   }
 
   /** Turn Trending Fill on or off; without a period the current one is kept. */
