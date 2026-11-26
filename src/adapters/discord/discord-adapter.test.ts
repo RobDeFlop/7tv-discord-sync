@@ -1,47 +1,74 @@
 import { describe, expect, test } from "bun:test";
-import { DiscordAdapter, MissingPermissionError, type GuildLike } from "./discord-adapter.ts";
+import { DiscordAdapter, MissingPermissionError } from "./discord-adapter.ts";
+import { GuildGateway, GuildProvider } from "./guild-gateway.ts";
 import { RateLimitError, WriteQueue } from "./write-queue.ts";
 import { FakeClock, flush } from "./write-queue.test.ts";
 
-function fakeGuild(opts: { premiumTier?: number; canManage?: boolean } = {}) {
-  const emojis = new Map<string, { id: string; name: string; animated: boolean }>();
-  let n = 1;
-  const calls: string[] = [];
-  const failures: unknown[] = [];
-  const guild: GuildLike = {
-    premiumTier: opts.premiumTier ?? 0,
-    async canManageExpressions() {
-      return opts.canManage ?? true;
-    },
-    async listEmojis() {
-      return [...emojis.values()];
-    },
-    async createEmoji(name, bytes) {
-      calls.push(`create ${name}`);
-      const f = failures.shift();
-      if (f) throw f;
-      const e = { id: `e${n++}`, name, animated: bytes[0] === 1 };
-      emojis.set(e.id, e);
-      return e;
-    },
-    async renameEmoji(id, name) {
-      calls.push(`rename ${id}`);
-      emojis.get(id)!.name = name;
-    },
-    async deleteEmoji(id) {
-      calls.push(`delete ${id}`);
-      emojis.delete(id);
-    },
-  };
-  return { guild, emojis, calls, failures };
+type Emoji = { id: string; name: string; animated: boolean };
+
+class TestGuild extends GuildGateway {
+  public readonly emojis = new Map<string, Emoji>();
+  public readonly calls: string[] = [];
+  public readonly failures: unknown[] = [];
+  private n = 1;
+
+  public constructor(
+    public readonly premiumTier: number,
+    private readonly canManage: boolean,
+  ) {
+    super();
+  }
+
+  public async canManageExpressions(): Promise<boolean> {
+    return this.canManage;
+  }
+
+  public async listEmojis(): Promise<Emoji[]> {
+    return [...this.emojis.values()];
+  }
+
+  public async createEmoji(name: string, bytes: Uint8Array): Promise<Emoji> {
+    this.calls.push(`create ${name}`);
+    const f = this.failures.shift();
+    if (f) throw f;
+    const e = { id: `e${this.n++}`, name, animated: bytes[0] === 1 };
+    this.emojis.set(e.id, e);
+    return e;
+  }
+
+  public async renameEmoji(id: string, name: string): Promise<void> {
+    this.calls.push(`rename ${id}`);
+    this.emojis.get(id)!.name = name;
+  }
+
+  public async deleteEmoji(id: string): Promise<void> {
+    this.calls.push(`delete ${id}`);
+    this.emojis.delete(id);
+  }
 }
 
-function setup(guilds: Record<string, GuildLike>) {
+class TestGuilds extends GuildProvider {
+  public constructor(private readonly guilds: Record<string, GuildGateway>) {
+    super();
+  }
+
+  public async getGuild(server: string): Promise<GuildGateway> {
+    return this.guilds[server]!;
+  }
+}
+
+function fakeGuild(opts: { premiumTier?: number; canManage?: boolean } = {}) {
+  const guild = new TestGuild(opts.premiumTier ?? 0, opts.canManage ?? true);
+  return { guild, emojis: guild.emojis, calls: guild.calls, failures: guild.failures };
+}
+
+function setup(guilds: Record<string, GuildGateway>) {
   const clock = new FakeClock();
   const queue = new WriteQueue({ clock });
-  const adapter = new DiscordAdapter({ getGuild: async (id) => guilds[id]!, queue });
+  const adapter = new DiscordAdapter(new TestGuilds(guilds), queue);
   return { adapter, clock };
 }
+
 
 const img = (animated: boolean) => ({ bytes: new Uint8Array([animated ? 1 : 0]), animated });
 
@@ -50,10 +77,10 @@ describe("DiscordAdapter", () => {
     const levels = [50, 100, 150, 250];
     for (const [tier, limit] of levels.entries()) {
       const { adapter } = setup({ s: fakeGuild({ premiumTier: tier }).guild });
-      expect(await adapter.getQuotas("s")).toEqual({
-        boostLevel: tier,
-        limits: { static: limit, animated: limit },
-      });
+      const quotas = await adapter.getQuotas("s");
+      expect(quotas.boostLevel).toBe(tier);
+      expect(quotas.limit("static")).toBe(limit);
+      expect(quotas.limit("animated")).toBe(limit);
     }
   });
 

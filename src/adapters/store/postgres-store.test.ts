@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { emptyServerState, type ServerState } from "../../domain/index.ts";
-import { createPostgresStore, type PostgresStore } from "./postgres-store.ts";
+import { ServerState, type ServerStateSnapshot } from "../../domain/index.ts";
+import { PostgresStore } from "./postgres-store.ts";
 
 const url = process.env.DATABASE_URL;
 
@@ -8,9 +8,10 @@ describe.skipIf(!url)("PostgresStore (needs DATABASE_URL)", () => {
   let store: PostgresStore;
   const a = "test-server-a";
   const b = "test-server-b";
+  const empty = ServerState.empty().toSnapshot();
 
   beforeAll(async () => {
-    store = createPostgresStore(url!);
+    store = new PostgresStore(url!);
     await store.migrate();
     await store.remove(a);
     await store.remove(b);
@@ -21,7 +22,7 @@ describe.skipIf(!url)("PostgresStore (needs DATABASE_URL)", () => {
     await store.close();
   });
 
-  const sample: ServerState = {
+  const sample: ServerStateSnapshot = {
     managedEmotes: [{ discordEmojiId: "1", sevenTvEmoteId: "e1", tier: "source", quota: "static" }],
     reservedSlots: [{ discordEmojiId: "2", quota: "animated" }],
     requestedEmotes: [{ sevenTvEmoteId: "e2", requestedName: "pog" }],
@@ -31,30 +32,32 @@ describe.skipIf(!url)("PostgresStore (needs DATABASE_URL)", () => {
     problems: [{ kind: "too-large", message: "big", sevenTvEmoteId: "e3" }],
   };
 
+  const snapshotOf = async (server: string) => (await store.load(server)).toSnapshot();
+
   test("unknown server loads empty state", async () => {
-    expect(await store.load(a)).toEqual(emptyServerState());
+    expect(await snapshotOf(a)).toEqual(empty);
   });
 
   test("save then load round-trips, and save overwrites", async () => {
-    await store.save(a, sample);
-    expect(await store.load(a)).toEqual(sample);
-    await store.save(a, emptyServerState());
-    expect(await store.load(a)).toEqual(emptyServerState());
+    await store.save(a, ServerState.fromSnapshot(sample));
+    expect(await snapshotOf(a)).toEqual(sample);
+    await store.save(a, ServerState.empty());
+    expect(await snapshotOf(a)).toEqual(empty);
   });
 
   test("state is scoped per server; remove deletes only that server", async () => {
-    await store.save(a, sample);
-    await store.save(b, emptyServerState());
+    await store.save(a, ServerState.fromSnapshot(sample));
+    await store.save(b, ServerState.empty());
     expect(await store.listServers()).toEqual(expect.arrayContaining([a, b]));
     await store.remove(a);
-    expect(await store.load(a)).toEqual(emptyServerState());
+    expect(await snapshotOf(a)).toEqual(empty);
     expect(await store.listServers()).not.toContain(a);
     expect(await store.listServers()).toContain(b);
   });
 
-  test("fields added to ServerState later survive a round trip", async () => {
-    const extended = { ...sample, futureField: { x: 1 } } as ServerState;
-    await store.save(a, extended);
-    expect(await store.load(a)).toEqual(extended);
+  test("fields added to the snapshot later survive a round trip", async () => {
+    const extended: ServerStateSnapshot = { ...sample, extra: { futureField: { x: 1 } } };
+    await store.save(a, ServerState.fromSnapshot(extended));
+    expect(await snapshotOf(a)).toEqual(extended);
   });
 });

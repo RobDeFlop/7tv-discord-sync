@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test";
-import { createSyncCore } from "./index.ts";
+import {
+  AddEmoteCommand,
+  ConfigureLogChannelCommand,
+  LinkSourceSetCommand,
+  RemoveEmoteCommand,
+  SyncCore,
+  UnlinkSourceSetCommand,
+} from "./index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
 
 const SERVER = "server-1";
@@ -8,7 +15,7 @@ test("core built from fakes reconciles a Server and keeps hand-made emojis untou
   const discord = new FakeDiscord();
   discord.addServer(SERVER, { boostLevel: 0 });
   discord.seedEmoji(SERVER, { name: "handmade", animated: false });
-  const core = createSyncCore({ sevenTv: new FakeSevenTv(), discord, store: new FakeStore() });
+  const core = new SyncCore(new FakeSevenTv(), discord, new FakeStore());
 
   const result = await core.reconcile(SERVER);
 
@@ -19,9 +26,9 @@ test("core built from fakes reconciles a Server and keeps hand-made emojis untou
 test("config command stores the log channel and returns feedback", async () => {
   const discord = new FakeDiscord();
   discord.addServer(SERVER, { boostLevel: 0 });
-  const core = createSyncCore({ sevenTv: new FakeSevenTv(), discord, store: new FakeStore() });
+  const core = new SyncCore(new FakeSevenTv(), discord, new FakeStore());
 
-  const result = await core.apply(SERVER, { type: "config", logChannelId: "chan-9" });
+  const result = await core.apply(SERVER, new ConfigureLogChannelCommand("chan-9"));
 
   expect(result.feedback.length).toBe(1);
   expect((await core.status(SERVER)).logChannelId).toBe("chan-9");

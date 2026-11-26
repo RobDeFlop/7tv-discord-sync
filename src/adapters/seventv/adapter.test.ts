@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { InvalidLinkError, type ImageResult } from "../../ports/index.ts";
+import { InvalidLinkError } from "../../domain/index.ts";
+import { FakeImagePipeline } from "../../testing/fakes.ts";
 import { SevenTvAdapter } from "./adapter.ts";
-import * as fx from "./fixtures.ts";
+import { SevenTvFixtures as fx } from "./fixtures.ts";
 
 type Route = (url: string, init?: RequestInit) => Response | undefined;
 
@@ -16,12 +17,9 @@ function setup(routes: Record<string, unknown | Uint8Array | number>) {
     if (hit === undefined) return new Response("not found", { status: 404 });
     return Response.json(hit);
   }) as typeof fetch;
-  const processed: { bytes: Uint8Array; animated: boolean }[] = [];
-  const processImage = async (bytes: Uint8Array, animated: boolean): Promise<ImageResult> => {
-    processed.push({ bytes, animated });
-    return { ok: true, image: { bytes, animated } };
-  };
-  const adapter = new SevenTvAdapter({ fetch: fetchFn, processImage, enableEvents: false, pollIntervalMs: 0 });
+  const pipeline = new FakeImagePipeline();
+  const processed = pipeline.processed;
+  const adapter = new SevenTvAdapter(pipeline, { fetch: fetchFn, enableEvents: false, pollIntervalMs: 0 });
   return { adapter, calls, processed };
 }
 
@@ -114,9 +112,8 @@ describe("trending", () => {
       calls.push(JSON.parse(String(init!.body)));
       return Response.json(page(++n));
     }) as unknown as typeof fetch;
-    const adapter = new SevenTvAdapter({
+    const adapter = new SevenTvAdapter(new FakeImagePipeline({ ok: false, reason: "unavailable" }), {
       fetch: fetchFn,
-      processImage: async () => ({ ok: false, reason: "unavailable" }),
       enableEvents: false,
       pollIntervalMs: 0,
     });
@@ -160,9 +157,8 @@ describe("downloadImage", () => {
     const { calls: _c } = setup({});
     const fetchFn = (async (u: string) =>
       u.includes("cdn") ? new Response(bytes) : Response.json(fx.animatedEmote)) as unknown as typeof fetch;
-    const adapter = new SevenTvAdapter({
+    const adapter = new SevenTvAdapter(new FakeImagePipeline({ ok: false, reason: "too-large" }), {
       fetch: fetchFn,
-      processImage: async () => ({ ok: false, reason: "too-large" }),
       enableEvents: false,
       pollIntervalMs: 0,
     });

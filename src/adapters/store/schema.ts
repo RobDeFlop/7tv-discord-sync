@@ -1,9 +1,9 @@
 import { jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import type {
-  ManagedEmote,
+  ManagedEmoteSnapshot,
   Problem,
   RequestedEmote,
-  ReservedSlot,
+  ReservedSlotSnapshot,
   TrendingSettings,
 } from "../../domain/index.ts";
 
@@ -17,8 +17,8 @@ export const servers = pgTable("servers", {
   linkedUserId: text("linked_user_id"),
   logChannelId: text("log_channel_id"),
   trending: jsonb("trending").$type<TrendingSettings>().notNull(),
-  managedEmotes: jsonb("managed_emotes").$type<ManagedEmote[]>().notNull(),
-  reservedSlots: jsonb("reserved_slots").$type<ReservedSlot[]>().notNull(),
+  managedEmotes: jsonb("managed_emotes").$type<ManagedEmoteSnapshot[]>().notNull(),
+  reservedSlots: jsonb("reserved_slots").$type<ReservedSlotSnapshot[]>().notNull(),
   requestedEmotes: jsonb("requested_emotes").$type<RequestedEmote[]>().notNull(),
   problems: jsonb("problems").$type<Problem[]>().notNull(),
   extra: jsonb("extra").$type<Record<string, unknown>>().notNull().default({}),
