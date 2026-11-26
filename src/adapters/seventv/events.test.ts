@@ -1,23 +1,20 @@
 import { expect, test } from "bun:test";
 import type { SevenTvChange } from "../../ports/index.ts";
 import { SevenTvAdapter } from "./adapter.ts";
-import type { SocketLike } from "./events.ts";
-import * as fx from "./fixtures.ts";
+import { EventSocket } from "./events.ts";
+import { SevenTvFixtures as fx } from "./fixtures.ts";
+import { FakeImagePipeline } from "../../testing/fakes.ts";
 
-class FakeSocket implements SocketLike {
-  sent: any[] = [];
-  closed = false;
-  onopen: any = null;
-  onmessage: any = null;
-  onclose: any = null;
-  onerror: any = null;
-  send(d: string) {
+class FakeSocket extends EventSocket {
+  public sent: any[] = [];
+  public closed = false;
+  public send(d: string) {
     this.sent.push(JSON.parse(d));
   }
-  close() {
+  public close() {
     this.closed = true;
   }
-  receive(msg: unknown) {
+  public receive(msg: unknown) {
     this.onmessage?.({ data: JSON.stringify(msg) });
   }
 }
@@ -33,9 +30,8 @@ function setup() {
     return hit ? Response.json(hit) : new Response("", { status: 404 });
   }) as unknown as typeof fetch;
   const sockets: FakeSocket[] = [];
-  const adapter = new SevenTvAdapter({
+  const adapter = new SevenTvAdapter(new FakeImagePipeline({ ok: false, reason: "unavailable" }), {
     fetch: fetchFn,
-    processImage: async () => ({ ok: false, reason: "unavailable" }),
     createSocket: () => {
       const s = new FakeSocket();
       sockets.push(s);
@@ -102,7 +98,7 @@ test("reconnects after a drop and resubscribes", async () => {
   await t.adapter.getSet(fx.SET_ID);
   t.listen();
   t.sockets[0]!.receive(hello);
-  t.sockets[0]!.onclose({ code: 4000 });
+  t.sockets[0]!.onclose?.({ code: 4000 });
   await Bun.sleep(1500 + 50);
   expect(t.sockets).toHaveLength(2);
   t.sockets[1]!.receive(hello);
