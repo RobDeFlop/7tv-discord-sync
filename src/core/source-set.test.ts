@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { createSyncCore } from "./index.ts";
+import {
+  AddEmoteCommand,
+  ConfigureLogChannelCommand,
+  LinkSourceSetCommand,
+  RemoveEmoteCommand,
+  SyncCore,
+  UnlinkSourceSetCommand,
+} from "./index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
 
 const S = "server-1";
@@ -11,7 +18,7 @@ function setup(opts: { boostLevel?: number } = {}) {
   discord.addServer(S, { boostLevel: opts.boostLevel ?? 0 });
   const sevenTv = new FakeSevenTv();
   const store = new FakeStore();
-  const core = createSyncCore({ sevenTv, discord, store });
+  const core = new SyncCore(sevenTv, discord, store);
   const names = (animated?: boolean) =>
     discord
       .emojis(S)
@@ -33,7 +40,7 @@ describe("link", () => {
     emotes(["a", "b"]);
     emotes(["x"], true);
     sevenTv.setEmotes("setA", "Main", ["a", "b", "x"]);
-    const r = await core.apply(S, { type: "link", link: userLink("u1") });
+    const r = await core.apply(S, new LinkSourceSetCommand(userLink("u1")));
     expect(errors(r)).toEqual([]);
     expect(names(false)).toEqual(["AA", "BB"]);
     expect(names(true)).toEqual(["XX"]);
@@ -44,7 +51,7 @@ describe("link", () => {
 
   test("invalid link gives a helpful error and links nothing", async () => {
     const { core } = setup();
-    const r = await core.apply(S, { type: "link", link: "https://example.com/x" });
+    const r = await core.apply(S, new LinkSourceSetCommand("https://example.com/x"));
     expect(errors(r).length).toBe(1);
     expect(errors(r)[0]!.text).toContain("7TV");
     expect((await core.status(S)).linkedUserId).toBeNull();
@@ -56,7 +63,7 @@ describe("reconcile mirrors the Source Set", () => {
     const { sevenTv, core, names, emotes } = setup();
     emotes(["a", "b", "c"]);
     sevenTv.setEmotes("setA", "Main", ["a", "b"]);
-    await core.apply(S, { type: "link", link: userLink("u1") });
+    await core.apply(S, new LinkSourceSetCommand(userLink("u1")));
 
     sevenTv.setEmotes("setA", "Main", ["b", "c"]);
     sevenTv.renameEmote("b", "Bee");
@@ -70,7 +77,7 @@ describe("reconcile mirrors the Source Set", () => {
     emotes(["a", "b", "c"]);
     sevenTv.setEmotes("setA", "Main", ["a", "b"]);
     sevenTv.setEmotes("setB", "Other", ["c"]);
-    await core.apply(S, { type: "link", link: userLink("u1") });
+    await core.apply(S, new LinkSourceSetCommand(userLink("u1")));
     sevenTv.setActiveSet("u1", "setB");
     await core.reconcile(S);
     expect(names()).toEqual(["CC"]);
@@ -80,8 +87,8 @@ describe("reconcile mirrors the Source Set", () => {
     const { sevenTv, core, names, emotes } = setup();
     emotes(["a", "b"]);
     sevenTv.setEmotes("setA", "Main", ["a", "b"]);
-    await core.apply(S, { type: "link", link: userLink("u1") });
-    await core.apply(S, { type: "add", link: emoteLink("a") });
+    await core.apply(S, new LinkSourceSetCommand(userLink("u1")));
+    await core.apply(S, new AddEmoteCommand(emoteLink("a")));
     sevenTv.setEmotes("setA", "Main", []);
     await core.reconcile(S);
     expect(names()).toEqual(["AA"]);
@@ -92,7 +99,7 @@ describe("reconcile mirrors the Source Set", () => {
     discord.seedEmoji(S, { name: "Bee", animated: false });
     emotes(["b"]);
     sevenTv.setEmotes("setA", "Main", ["b"]);
-    await core.apply(S, { type: "link", link: userLink("u1") });
+    await core.apply(S, new LinkSourceSetCommand(userLink("u1")));
     sevenTv.renameEmote("b", "Bee");
     await core.reconcile(S);
     expect(names()).toEqual(["Bee", "Bee_2"]);
@@ -102,7 +109,7 @@ describe("reconcile mirrors the Source Set", () => {
     const { sevenTv, discord, core, names, emotes } = setup();
     emotes(["a"]);
     sevenTv.setEmotes("setA", "Main", ["a"]);
-    await core.apply(S, { type: "link", link: userLink("u1") });
+    await core.apply(S, new LinkSourceSetCommand(userLink("u1")));
     discord.removeEmojiByHand(S, discord.emojis(S)[0]!.id);
     await core.reconcile(S);
     expect(names()).toEqual(["AA"]);
@@ -120,7 +127,7 @@ describe("emotes that do not fit", () => {
 
   test("are left out in set order with feedback and recorded as pending", async () => {
     const { core, names } = await fullWithOneFree();
-    const r = await core.apply(S, { type: "link", link: userLink("u1") });
+    const r = await core.apply(S, new LinkSourceSetCommand(userLink("u1")));
     expect(names()).toContain("AA");
     expect(names()).not.toContain("BB");
     expect(names()).not.toContain("CC");
@@ -131,7 +138,7 @@ describe("emotes that do not fit", () => {
 
   test("are added once slots free up, and the pending problem clears", async () => {
     const { core, discord, names } = await fullWithOneFree();
-    await core.apply(S, { type: "link", link: userLink("u1") });
+    await core.apply(S, new LinkSourceSetCommand(userLink("u1")));
     discord.removeEmojiByHand(S, discord.emojis(S).find((e) => e.name === "hand0")!.id);
     await core.reconcile(S);
     expect(names()).toContain("BB");
@@ -144,7 +151,7 @@ describe("emotes that do not fit", () => {
 
   test("repeated reconciles do not repeat the same feedback", async () => {
     const { core } = await fullWithOneFree();
-    await core.apply(S, { type: "link", link: userLink("u1") });
+    await core.apply(S, new LinkSourceSetCommand(userLink("u1")));
     const r = await core.reconcile(S);
     expect(r.feedback).toEqual([]);
   });
@@ -154,7 +161,7 @@ describe("emotes that do not fit", () => {
     emotes(["a", "b"]);
     sevenTv.setImageSize("a", 300 * 1024);
     sevenTv.setEmotes("setA", "Main", ["a", "b"]);
-    const r = await core.apply(S, { type: "link", link: userLink("u1") });
+    const r = await core.apply(S, new LinkSourceSetCommand(userLink("u1")));
     expect(names()).toEqual(["BB"]);
     expect(r.feedback.some((f) => f.text.includes("AA"))).toBe(true);
     expect((await core.status(S)).problems.map((p) => p.kind)).toContain("too-large");
@@ -167,8 +174,8 @@ describe("add displaces Source Set emotes", () => {
     for (let i = 0; i < 49; i++) discord.seedEmoji(S, { name: `hand${i}`, animated: false });
     emotes(["a", "r"]);
     sevenTv.setEmotes("setA", "Main", ["a"]);
-    await core.apply(S, { type: "link", link: userLink("u1") });
-    const r = await core.apply(S, { type: "add", link: emoteLink("r") });
+    await core.apply(S, new LinkSourceSetCommand(userLink("u1")));
+    const r = await core.apply(S, new AddEmoteCommand(emoteLink("r")));
     expect(names()).toContain("RR");
     expect(names()).not.toContain("AA");
     expect(r.feedback.some((f) => f.level === "warning")).toBe(true);
@@ -184,14 +191,14 @@ describe("unlink", () => {
     ctx.discord.seedEmoji(S, { name: "hand", animated: false });
     ctx.emotes(["a", "b"]);
     ctx.sevenTv.setEmotes("setA", "Main", ["a", "b"]);
-    await ctx.core.apply(S, { type: "link", link: userLink("u1") });
-    await ctx.core.apply(S, { type: "add", link: emoteLink("a") });
+    await ctx.core.apply(S, new LinkSourceSetCommand(userLink("u1")));
+    await ctx.core.apply(S, new AddEmoteCommand(emoteLink("a")));
     return ctx;
   }
 
   test("delete removes Source Set emotes but keeps Requested and Reserved", async () => {
     const { core, names } = await linked();
-    const r = await core.apply(S, { type: "unlink", keepEmotes: false });
+    const r = await core.apply(S, new UnlinkSourceSetCommand(false));
     expect(errors(r)).toEqual([]);
     expect(names()).toEqual(["AA", "hand"]);
     expect((await core.status(S)).linkedUserId).toBeNull();
@@ -199,7 +206,7 @@ describe("unlink", () => {
 
   test("keep turns Source Set emotes into Reserved Slots that later syncs never touch", async () => {
     const { sevenTv, core, names } = await linked();
-    await core.apply(S, { type: "unlink", keepEmotes: true });
+    await core.apply(S, new UnlinkSourceSetCommand(true));
     expect(names()).toEqual(["AA", "BB", "hand"]);
     const st = await core.status(S);
     expect(st.quotas.static.byTier.source).toBe(0);
@@ -207,13 +214,13 @@ describe("unlink", () => {
     sevenTv.setEmotes("setA", "Main", []);
     await core.reconcile(S);
     expect(names()).toEqual(["AA", "BB", "hand"]);
-    const r = await core.apply(S, { type: "remove", name: "BB" });
+    const r = await core.apply(S, new RemoveEmoteCommand("BB"));
     expect(errors(r).length).toBe(1);
   });
 
   test("unlink without a link gives an error", async () => {
     const { core } = setup();
-    const r = await core.apply(S, { type: "unlink", keepEmotes: true });
+    const r = await core.apply(S, new UnlinkSourceSetCommand(true));
     expect(errors(r).length).toBe(1);
   });
 });
