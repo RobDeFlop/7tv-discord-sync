@@ -2,27 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { ConfigureLogChannelCommand, LinkSourceSetCommand, SyncCore } from "../core/index.ts";
 import type { ServerId } from "../domain/index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
-import { FeedbackRouter, LogChannel } from "./feedback-router.ts";
-import { GatewayEvents, ServerDirectory } from "./gateway-events.ts";
+import { FeedbackRouter } from "./feedback-router.ts";
+import { GatewayEvents } from "./gateway-events.ts";
+import { FakeLogChannel, FakeServers } from "../testing/bot-fakes.ts";
 import { ServerLock } from "./server-lock.ts";
-
-class FakeLogChannel extends LogChannel {
-  public readonly sent: { channelId: string; text: string }[] = [];
-  public fail = false;
-
-  public async send(channelId: string, text: string): Promise<void> {
-    if (this.fail) throw new Error("cannot send");
-    this.sent.push({ channelId, text });
-  }
-}
-
-class FakeServers extends ServerDirectory {
-  public ids: ServerId[] = [];
-
-  public serverIds(): ServerId[] {
-    return [...this.ids];
-  }
-}
 
 const A = "server-a";
 const B = "server-b";

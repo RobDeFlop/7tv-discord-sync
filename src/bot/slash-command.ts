@@ -1,5 +1,5 @@
 import type { SyncCore, Command } from "../core/index.ts";
-import type { ServerId } from "../domain/index.ts";
+import { DomainError, type ServerId } from "../domain/index.ts";
 import { FeedbackRouter } from "./feedback-router.ts";
 import type { ServerLock } from "./server-lock.ts";
 import type { SlashRequest } from "./slash-request.ts";
@@ -22,6 +22,8 @@ export abstract class SlashCommand {
   public abstract readonly description: string;
   public readonly options: ReadonlyArray<SlashOption> = [];
 
+  protected readonly needsLock: boolean = true;
+
   public constructor(
     protected readonly core: SyncCore,
     private readonly lock: ServerLock,
@@ -33,8 +35,10 @@ export abstract class SlashCommand {
     if (!request.isAdministrator) return request.reply("Only members with the Administrator permission can use this command.");
     await request.defer();
     try {
-      await request.reply(await this.lock.run(server, () => this.run(server, request)));
+      const run = () => this.run(server, request);
+      await request.reply(await (this.needsLock ? this.lock.run(server, run) : run()));
     } catch (err) {
+      if (err instanceof DomainError) return request.reply(FeedbackRouter.format([err.toFeedback()]));
       console.error(`/${this.path} failed in ${server}:`, err);
       await request.reply("Something went wrong. Try again in a moment.");
     }

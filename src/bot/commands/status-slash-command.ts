@@ -7,6 +7,8 @@ export class StatusSlashCommand extends SlashCommand {
   public readonly path = "status";
   public readonly description = "Show slot usage, settings, problems and pending writes";
 
+  protected override readonly needsLock = false;
+
   protected async run(server: ServerId, _request: SlashRequest): Promise<string> {
     return StatusSlashCommand.render(await this.core.status(server), Date.now());
   }

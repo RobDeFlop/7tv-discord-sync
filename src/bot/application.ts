@@ -24,7 +24,7 @@ export class Application {
     const feedback = new FeedbackRouter(this.store, DiscordBot.logChannel(client));
     const events = new GatewayEvents(core, this.store, feedback, lock, DiscordBot.servers(client));
     events.listenToSevenTv(sevenTv);
-    this.bot = new DiscordBot(client, events, new SlashCommandRegistry(core, lock));
+    this.bot = new DiscordBot(client, events, new SlashCommandRegistry(core, lock, events));
   }
 
   public async start(): Promise<void> {
