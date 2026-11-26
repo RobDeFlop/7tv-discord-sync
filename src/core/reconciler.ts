@@ -17,8 +17,10 @@ export class Reconciler {
   public async reconcile(server: ServerId): Promise<SyncResult> {
     const synced = await this.context.load(server);
     const report = new SyncReport();
+    synced.state.beginProblemReview();
     try {
       for (const step of this.steps) report.merge(await step.run(synced));
+      synced.state.endProblemReview(); // only a full run knows which problems are gone
     } catch (err) {
       // Stop at the first domain error (e.g. missing permission) but keep the state of what was done.
       if (!(err instanceof DomainError)) throw err;

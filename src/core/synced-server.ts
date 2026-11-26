@@ -15,6 +15,7 @@ import type { DiscordPort } from "../ports/index.ts";
  */
 export class SyncedServer {
   private emojis: DiscordEmoji[];
+  private quotaLookup: Promise<ServerQuotas> | undefined;
 
   public constructor(
     public readonly id: ServerId,
@@ -29,9 +30,20 @@ export class SyncedServer {
     return this.emojis.find((e) => e.name === name);
   }
 
-  /** The Discord emoji a slot occupant stands for. */
+  /**
+   * The Discord emoji a slot occupant stands for. Loading drops Managed Emotes
+   * whose emoji is gone, so a missing one is a broken invariant, reported as such.
+   */
   public emojiOf(occupant: SlotOccupant): DiscordEmoji {
-    return this.emojis.find((e) => e.id === occupant.discordEmojiId)!;
+    const emoji = this.emojis.find((e) => e.id === occupant.discordEmojiId);
+    if (!emoji) throw new Error(`No Discord emoji ${occupant.discordEmojiId} on server ${this.id}`);
+    return emoji;
+  }
+
+  /** Slot limits at the Server's boost level, looked up once per load. */
+  public quotas(): Promise<ServerQuotas> {
+    this.quotaLookup ??= this.discord.getQuotas(this.id);
+    return this.quotaLookup;
   }
 
   public emojiNames(): string[] {

@@ -8,7 +8,6 @@ import {
   type SevenTvEmote,
   type SlotPlan,
 } from "../domain/index.ts";
-import type { DiscordPort } from "../ports/index.ts";
 import type { SyncReport } from "./sync-report.ts";
 import type { SyncedServer } from "./synced-server.ts";
 
@@ -20,10 +19,8 @@ export interface Placement {
 
 /** Gives emotes their slots: plans by Precedence, displaces, creates the emoji. */
 export class SlotAllocator {
-  public constructor(private readonly discord: DiscordPort) {}
-
   public async plan(synced: SyncedServer, quota: Quota, tier: ManagedTier): Promise<SlotPlan> {
-    const quotas = await this.discord.getQuotas(synced.id);
+    const quotas = await synced.quotas();
     return synced.state.planSlot(quota, tier, synced.usedIn(quota), quotas.limit(quota));
   }
 

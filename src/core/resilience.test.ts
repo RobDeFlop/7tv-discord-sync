@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { LinkSourceSetCommand, SyncCore } from "./index.ts";
+import { LinkSourceSetCommand, SetTrendingCommand, SyncCore } from "./index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
 
 const S = "server-1";
@@ -16,6 +16,18 @@ function setup() {
   };
   return { discord, sevenTv, core, emotes };
 }
+
+describe("Trending Fill", () => {
+  test("looks up the slot limits once per reconcile, not once per candidate", async () => {
+    const { discord, sevenTv, core, emotes } = setup();
+    emotes(["a", "b", "c", "d", "e"]);
+    sevenTv.setTrending("week", ["a", "b", "c", "d", "e"]);
+    await core.reconcile(S);
+    const before = discord.quotaLookups;
+    await core.apply(S, new SetTrendingCommand(true));
+    expect(discord.quotaLookups - before).toBe(1);
+  });
+});
 
 describe("state survives unexpected errors", () => {
   test("emojis created before a failing write stay Managed, not Reserved", async () => {

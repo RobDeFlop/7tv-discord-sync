@@ -16,6 +16,13 @@ import type {
 
 export type SlotPlan = { ok: true; displace: ManagedEmote | null } | { ok: false };
 
+/** Selects recorded problems; an omitted field matches anything. */
+export interface ProblemMatch {
+  kind: ProblemKind;
+  sevenTvEmoteId?: SevenTvEmoteId;
+  message?: string;
+}
+
 /** Everything the bot persists for one Server. */
 export class ServerState {
   private managed: ManagedEmote[];
@@ -26,6 +33,8 @@ export class ServerState {
   private logChannel: string | null;
   private problemList: Problem[];
   private readonly extra: Record<string, unknown>;
+  /** Problems found again during the current review (see beginProblemReview). */
+  private readonly confirmed = new Set<Problem>();
 
   private constructor(snapshot: ServerStateSnapshot) {
     this.managed = snapshot.managedEmotes.map((m) => ManagedEmote.fromSnapshot(m));
@@ -147,15 +156,15 @@ export class ServerState {
     this.logChannel = channelId;
   }
 
-  /** Record a problem unless an identical one is already recorded. */
+  /** Record a problem unless an identical one is already recorded; either way it counts as confirmed in this review. */
   public recordProblem(problem: Problem): void {
-    const duplicate = this.problemList.some(
-      (p) =>
-        p.kind === problem.kind &&
-        p.sevenTvEmoteId === problem.sevenTvEmoteId &&
-        p.message === problem.message,
-    );
-    if (!duplicate) this.problemList.push(problem);
+    const existing = this.problemList.find((p) => ServerState.matches(p, problem));
+    if (existing) {
+      this.confirmed.add(existing);
+    } else {
+      this.problemList.push(problem);
+      this.confirmed.add(problem);
+    }
   }
 
   /** Record a problem even if an identical one exists (used for the rebuilt pending list). */
@@ -164,12 +173,51 @@ export class ServerState {
   }
 
   /** Whether a problem of `kind` is recorded for the emote (or, with `message`, with that text). */
-  public hasProblem(match: { kind: ProblemKind; sevenTvEmoteId?: SevenTvEmoteId; message?: string }): boolean {
-    return this.problemList.some(
-      (p) =>
-        p.kind === match.kind &&
-        (match.sevenTvEmoteId === undefined || p.sevenTvEmoteId === match.sevenTvEmoteId) &&
-        (match.message === undefined || p.message === match.message),
+  public hasProblem(match: ProblemMatch): boolean {
+    return this.problemList.some((p) => ServerState.matches(p, match));
+  }
+
+  /** Mark matching problems as still current in this review. */
+  public confirmProblem(match: ProblemMatch): void {
+    for (const p of this.problemList) if (ServerState.matches(p, match)) this.confirmed.add(p);
+  }
+
+  /** Forget matching problems. */
+  public clearProblem(match: ProblemMatch): void {
+    this.problemList = this.problemList.filter((p) => !ServerState.matches(p, match));
+  }
+
+  /** Start a review: problems must be confirmed again to survive {@link endProblemReview}. */
+  public beginProblemReview(): void {
+    this.confirmed.clear();
+  }
+
+  /**
+   * End a review and drop what is no longer current: skipped and too-large problems nothing
+   * confirmed again, and suffix notices for emotes that are not managed any more. Pending
+   * problems are rebuilt by the Source Set mirror itself.
+   */
+  public endProblemReview(): void {
+    this.problemList = this.problemList.filter((p) => this.isCurrent(p));
+    this.confirmed.clear();
+  }
+
+  private isCurrent(problem: Problem): boolean {
+    switch (problem.kind) {
+      case "pending":
+        return true;
+      case "renamed-with-suffix":
+        return problem.sevenTvEmoteId !== undefined && this.findManaged(problem.sevenTvEmoteId) !== undefined;
+      default:
+        return this.confirmed.has(problem);
+    }
+  }
+
+  private static matches(problem: Problem, match: ProblemMatch): boolean {
+    return (
+      problem.kind === match.kind &&
+      (match.sevenTvEmoteId === undefined || problem.sevenTvEmoteId === match.sevenTvEmoteId) &&
+      (match.message === undefined || problem.message === match.message)
     );
   }
 

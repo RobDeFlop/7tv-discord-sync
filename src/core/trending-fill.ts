@@ -1,4 +1,6 @@
 import { ServerQuotas, type SyncResult } from "../domain/index.ts";
+import { ImageFailure } from "./image-failure.ts";
+import { NameCollision } from "./name-collision.ts";
 import { ReconcileStep } from "./reconcile-step.ts";
 import { SyncReport } from "./sync-report.ts";
 import type { SyncedServer } from "./synced-server.ts";
@@ -39,9 +41,22 @@ export class TrendingFill extends ReconcileStep {
       const quota = ServerQuotas.quotaOf(emote.animated);
       const plan = await this.context.allocator.plan(synced, quota, "trending");
       if (!plan.ok || plan.displace) continue; // only genuinely free slots
+      // An emote known to be too large stays too large: do not download it again.
+      const tooLarge = { kind: "too-large", sevenTvEmoteId: emote.id } as const;
+      if (state.hasProblem(tooLarge)) {
+        state.confirmProblem(tooLarge);
+        continue;
+      }
       const image = await this.context.sevenTv.downloadImage(emote.id);
-      if (!image.ok) continue; // retried on the next reconcile
-      await this.context.allocator.place(synced, report, plan, emote, image.image, "trending", emote.name);
+      if (!image.ok) {
+        new ImageFailure(emote, image.reason).recordOnce(state, report);
+        continue;
+      }
+      const placed = await this.context.allocator.place(synced, report, plan, emote, image.image, "trending", emote.name);
+      if (placed.suffixed) {
+        const collision = NameCollision.onAdd(emote.name, placed.name, emote.id);
+        if (collision.record(state)) report.say("warning", collision.text);
+      }
     }
   }
 }
