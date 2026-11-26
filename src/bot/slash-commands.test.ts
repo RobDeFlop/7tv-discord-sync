@@ -58,6 +58,16 @@ class FakeRequest extends SlashRequest {
   }
 }
 
+class PreviewImageMutatingRequest extends FakeRequest {
+  public override async reply(reply: SlashReply): Promise<void> {
+    await super.reply(reply);
+    if (typeof reply === "string" || !("originalName" in reply)) return;
+    reply.image.bytes.fill(0);
+    reply.image.bytes = new Uint8Array(0);
+    reply.image.animated = true;
+  }
+}
+
 class FakeEmoteAddInteraction extends EmoteAddInteraction {
   public text = "";
   public formValue?: string;
@@ -186,15 +196,15 @@ describe("/emote add preview", () => {
   });
 
   test("changing the preview image or its bytes cannot affect the uploaded image", async () => {
-    const { discord, sevenTv, openPreview, interact } = setup();
+    const { discord, sevenTv, registry, interact } = setup();
     const bytes = Buffer.from([1, 2, 3]);
     spyOn(sevenTv, "downloadImage").mockResolvedValue({ ok: true, image: { bytes, animated: false } });
-    const preview = await openPreview();
-    preview.image.bytes.fill(0);
-    preview.image.bytes = new Uint8Array(0);
-    preview.image.animated = true;
+    const request = new PreviewImageMutatingRequest("emote add", { link: EMOTE_LINK });
+    await registry.handle(request);
+    const id = request.preview?.id;
+    if (id === undefined) throw new Error("Expected an importable emote preview");
 
-    expect((await interact(preview.id, { kind: "add" })).text).toContain("Added Pog");
+    expect((await interact(id, { kind: "add" })).text).toContain("Added Pog");
     const [emoji] = discord.emojis(S);
     expect(discord.emojiImageSnapshot(emoji!.id)).toEqual({ bytes: new Uint8Array([1, 2, 3]), animated: false });
   });
