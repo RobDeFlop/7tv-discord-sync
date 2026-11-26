@@ -124,6 +124,7 @@ export class ServerState {
 
   public removeManagedEmote(emote: ManagedEmote): void {
     this.managed = this.managed.filter((m) => m !== emote);
+    if (emote.tier === "requested") this.requested = this.requested.filter((r) => r.sevenTvEmoteId !== emote.sevenTvEmoteId);
   }
 
   /**
@@ -142,10 +143,6 @@ export class ServerState {
 
   public addRequestedEmote(request: RequestedEmote): void {
     this.requested.push(request);
-  }
-
-  public removeRequestedEmote(sevenTvEmoteId: SevenTvEmoteId): void {
-    this.requested = this.requested.filter((r) => r.sevenTvEmoteId !== sevenTvEmoteId);
   }
 
   public linkUser(userId: SevenTvUserId): void {
