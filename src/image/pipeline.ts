@@ -1,4 +1,4 @@
-import sharp from "sharp";
+import sharp, { type Metadata } from "sharp";
 import type { ImageResult } from "../ports/index.ts";
 
 export const DISCORD_EMOJI_MAX_BYTES = 256 * 1024;
@@ -52,7 +52,7 @@ async function shrinkStatic(input: Uint8Array, maxBytes: number): Promise<Uint8A
 
 async function shrinkAnimated(
   input: Uint8Array,
-  meta: sharp.Metadata,
+  meta: Metadata,
   maxBytes: number,
 ): Promise<Uint8Array | null> {
   const pages = meta.pages ?? 1;
