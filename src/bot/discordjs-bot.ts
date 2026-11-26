@@ -3,12 +3,14 @@ import {
   PermissionFlagsBits,
   type ChatInputCommandInteraction,
   type Client,
+  type Interaction,
 } from "discord.js";
 import type { ServerId } from "../domain/index.ts";
+import { DiscordJsEmoteAddInteraction } from "./discordjs-emote-add.ts";
 import { LogChannel } from "./feedback-router.ts";
 import { ServerDirectory, type GatewayEvents } from "./gateway-events.ts";
 import type { SlashCommandRegistry } from "./slash-command-registry.ts";
-import { SlashRequest } from "./slash-request.ts";
+import { SlashRequest, type SlashReply } from "./slash-request.ts";
 
 /** A slash command interaction behind SlashRequest. Replies are always ephemeral. */
 export class DiscordJsSlashRequest extends SlashRequest {
@@ -32,6 +34,10 @@ export class DiscordJsSlashRequest extends SlashRequest {
     return this.interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
   }
 
+  public get userId(): string {
+    return this.interaction.user.id;
+  }
+
   public stringOption(name: string): string | null {
     const value = this.interaction.options.get(name)?.value;
     return typeof value === "string" ? value : null;
@@ -46,11 +52,13 @@ export class DiscordJsSlashRequest extends SlashRequest {
     await this.interaction.deferReply({ flags: MessageFlags.Ephemeral });
   }
 
-  public async reply(text: string): Promise<void> {
-    const content = text.slice(0, DiscordJsSlashRequest.MAX_MESSAGE);
-    if (this.interaction.deferred && !this.replied) await this.interaction.editReply({ content });
-    else if (this.replied || this.interaction.replied) await this.interaction.followUp({ content, flags: MessageFlags.Ephemeral });
-    else await this.interaction.reply({ content, flags: MessageFlags.Ephemeral });
+  public async reply(reply: SlashReply): Promise<void> {
+    const options = typeof reply === "string"
+      ? { content: reply.slice(0, DiscordJsSlashRequest.MAX_MESSAGE) }
+      : DiscordJsEmoteAddInteraction.previewReply(reply);
+    if (this.interaction.deferred && !this.replied) await this.interaction.editReply(options);
+    else if (this.replied || this.interaction.replied) await this.interaction.followUp({ ...options, flags: MessageFlags.Ephemeral });
+    else await this.interaction.reply({ ...options, flags: MessageFlags.Ephemeral });
     this.replied = true;
   }
 }
@@ -121,9 +129,14 @@ export class DiscordBot {
       if (before.premiumTier !== after.premiumTier) void this.events.boostChanged(after.id);
     });
     c.on("interactionCreate", (interaction) => {
-      if (!interaction.isChatInputCommand()) return;
-      this.registry.handle(new DiscordJsSlashRequest(interaction)).catch((e) => console.error("Command failed:", e));
+      this.onInteraction(interaction).catch((e) => console.error("Interaction failed:", e));
     });
+  }
+
+  private async onInteraction(interaction: Interaction): Promise<void> {
+    if (interaction.isChatInputCommand()) return this.registry.handle(new DiscordJsSlashRequest(interaction));
+    const request = DiscordJsEmoteAddInteraction.from(interaction);
+    if (request) await this.registry.handleEmoteAddInteraction(request);
   }
 
   private async onReady(): Promise<void> {

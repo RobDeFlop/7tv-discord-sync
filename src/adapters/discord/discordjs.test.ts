@@ -9,6 +9,28 @@ function guildWith(emojis: Record<string, unknown>): DiscordJsGuild {
 
 const created = { id: "1", name: "pog", animated: false };
 
+describe("DiscordJsGuild.downloadEmojiImage", () => {
+  const client = DiscordJsAdapter.createClient();
+  const guild = { client } as Guild;
+
+  test.each([false, true])("downloads the existing emoji in the matching format (animated: %s)", async (animated) => {
+    const urls: string[] = [];
+    const http = async (url: string) => {
+      urls.push(url);
+      return new Response(new Uint8Array([1, 2, 3]));
+    };
+    const adapter = new DiscordJsGuild(guild, http);
+    const image = await adapter.downloadEmojiImage({ ...created, animated });
+    expect(image).toEqual({ bytes: new Uint8Array([1, 2, 3]), animated });
+    expect(urls).toEqual([`https://cdn.discordapp.com/emojis/1.${animated ? "gif" : "png"}`]);
+  });
+
+  test("returns no image when the CDN can't serve it", async () => {
+    const http = async () => new Response(null, { status: 404 });
+    expect(await new DiscordJsGuild(guild, http).downloadEmojiImage(created)).toBeNull();
+  });
+});
+
 describe("DiscordJsGuild.createEmoji", () => {
   test("uploads a static image as a PNG data URI", async () => {
     let sent: { attachment: unknown; name: string } | undefined;

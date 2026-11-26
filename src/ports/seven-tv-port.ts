@@ -11,7 +11,8 @@ import type {
 
 export type ImageResult =
   | { ok: true; image: EmojiImage }
-  | { ok: false; reason: "too-large" | "unavailable" };
+  | { ok: false; reason: "too-large"; previewImage: EmojiImage }
+  | { ok: false; reason: "unavailable" };
 
 export type SevenTvChange =
   | { type: "set-changed"; setId: SevenTvSetId }
@@ -31,7 +32,8 @@ export abstract class SevenTvPort {
   public abstract getTrending(period: TrendingPeriod, limit: number): Promise<SevenTvEmote[]>;
   /**
    * Download the emote ready for Discord. The adapter runs the image pipeline,
-   * so a result is either under the size limit or a failure.
+   * so a result is either ready to upload or a failure. An oversized emote
+   * includes a preview image that must not be used as a replacement upload.
    */
   public abstract downloadImage(id: SevenTvEmoteId): Promise<ImageResult>;
 

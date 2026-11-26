@@ -1,5 +1,7 @@
 import {
   DisplacementError,
+  EmoteAddNameConflictError,
+  EmoteAddPromotionUnavailableError,
   EmoteNamer,
   QuotaFullError,
   ServerQuotas,
@@ -15,22 +17,26 @@ import { SyncReport } from "../sync-report.ts";
 import type { SyncContext } from "../sync-context.ts";
 import type { SyncedServer } from "../synced-server.ts";
 import { Command } from "./command.ts";
+import { PreparedEmotePromotion, type PreparedEmoteAdd, type PreparedEmoteUpload } from "./prepared-emote-add.ts";
 
 /** Add a 7TV emote as a Requested Emote. */
 export class AddEmoteCommand extends Command {
-  public constructor(
-    private readonly link: string,
-    private readonly name?: string,
-  ) {
+  public constructor(private readonly source: string | PreparedEmoteAdd, private readonly name?: string) {
     super();
   }
 
   public async execute(server: ServerId, context: SyncContext): Promise<SyncResult> {
-    const emote = await context.sevenTv.resolveEmoteLink(this.link);
+    const { source } = this;
+    const emote = typeof source === "string" ? await context.sevenTv.resolveEmoteLink(source) : source.emote;
     const synced = await context.load(server);
     try {
       const existing = synced.state.findManaged(emote.id);
-      return existing ? await this.promote(synced, emote, existing) : await this.addNew(context, synced, emote);
+      if (source instanceof PreparedEmotePromotion) {
+        if (!existing || existing.discordEmojiId !== source.discordEmojiId) throw new EmoteAddPromotionUnavailableError();
+        return await this.promote(synced, emote, existing);
+      }
+      if (existing) return await this.promote(synced, emote, existing);
+      return await this.addNew(context, synced, emote, source);
     } finally {
       // Persist whatever was applied, even when a write failed half-way.
       await context.store.save(server, synced.state);
@@ -42,14 +48,14 @@ export class AddEmoteCommand extends Command {
     const { state } = synced;
     const report = new SyncReport();
     const emoji = synced.emojiOf(existing);
-    const promoted = existing.tier !== "requested";
-    if (promoted) {
-      existing.promoteTo("requested");
-      state.addRequestedEmote({ sevenTvEmoteId: emote.id, requestedName: this.name });
+    const wanted = this.name ? EmoteNamer.unique(this.name, synced.emojiNamesExcept(emoji.id)) : undefined;
+    if (typeof this.source !== "string") {
+      if (this.name && wanted?.suffixed) throw EmoteAddNameConflictError.taken(this.name);
+      if (!this.name && emoji.name !== this.source.defaultName) throw EmoteAddNameConflictError.changed();
     }
+
     let name = emoji.name;
-    if (this.name) {
-      const wanted = EmoteNamer.unique(this.name, synced.emojiNamesExcept(emoji.id));
+    if (this.name && wanted) {
       if (wanted.name !== emoji.name) {
         await synced.renameEmoji(emoji, wanted.name);
         report.change({ type: "renamed", from: emoji.name, to: wanted.name });
@@ -61,17 +67,27 @@ export class AddEmoteCommand extends Command {
         report.say("warning", collision.text);
       }
     }
-    if (promoted) report.say("info", `${name} is now a Requested Emote.`);
-    else if (report.toResult().feedback.length === 0) report.say("info", `${name} is already on this Server.`);
+    if (existing.tier !== "requested") {
+      existing.promoteTo("requested");
+      state.addRequestedEmote({ sevenTvEmoteId: emote.id, requestedName: this.name });
+      report.say("info", `${name} is now a Requested Emote.`);
+    } else if (report.toResult().feedback.length === 0) report.say("info", `${name} is already on this Server.`);
     return report.toResult();
   }
 
-  private async addNew(context: SyncContext, synced: SyncedServer, emote: SevenTvEmote): Promise<SyncResult> {
+  private async addNew(
+    context: SyncContext,
+    synced: SyncedServer,
+    emote: SevenTvEmote,
+    source: string | PreparedEmoteUpload,
+  ): Promise<SyncResult> {
     const { state } = synced;
     const quota = ServerQuotas.quotaOf(emote.animated);
-    const image = await context.sevenTv.downloadImage(emote.id);
-    if (!image.ok) {
-      const failure = new ImageFailure(emote, image.reason);
+    const result = typeof source === "string"
+      ? await context.sevenTv.downloadImage(emote.id)
+      : { ok: true as const, image: source.uploadImage };
+    if (!result.ok) {
+      const failure = new ImageFailure(emote, result.reason);
       state.recordProblem(failure.toProblem());
       return SyncReport.single("error", failure.text);
     }
@@ -79,17 +95,22 @@ export class AddEmoteCommand extends Command {
     const plan = await context.allocator.plan(synced, quota, "requested");
     if (!plan.ok) throw new QuotaFullError(quota, emote.name);
 
+    const requestedName = this.name ?? (typeof source === "string" ? undefined : source.defaultName);
+    const wanted = requestedName ?? emote.name;
+    if (typeof source !== "string" && context.allocator.placementName(synced, wanted, plan.displace).suffixed) {
+      throw EmoteAddNameConflictError.taken(wanted);
+    }
+
     const report = new SyncReport();
-    const wanted = this.name ?? emote.name;
     let placed: Placement;
     try {
-      placed = await context.allocator.place(synced, report, plan, emote, image.image, "requested", wanted);
+      placed = await context.allocator.place(synced, report, plan, emote, result.image, "requested", wanted);
     } catch (error) {
       if (!(error instanceof DisplacementError)) throw error;
       report.say("error", error.toFeedback().text);
       return report.toResult();
     }
-    state.addRequestedEmote({ sevenTvEmoteId: emote.id, requestedName: this.name });
+    state.addRequestedEmote({ sevenTvEmoteId: emote.id, requestedName });
     if (placed.suffixed) {
       const collision = NameCollision.onAdd(wanted, placed.name, emote.id);
       collision.record(state);
