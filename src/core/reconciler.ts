@@ -23,8 +23,11 @@ export class Reconciler {
       // Stop at the first domain error (e.g. missing permission) but keep the state of what was done.
       if (!(err instanceof DomainError)) throw err;
       report.say(err.toFeedback().level, err.toFeedback().text);
+    } finally {
+      // Whatever was applied is persisted, even when an unexpected error propagates, so
+      // emojis created in this run are not mistaken for hand-made ones on the next load.
+      await this.context.store.save(server, synced.state);
     }
-    await this.context.store.save(server, synced.state);
     return report.toResult();
   }
 }
