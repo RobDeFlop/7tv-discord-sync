@@ -1,4 +1,5 @@
 import type { ServerId, SyncResult } from "../domain/index.ts";
+import { QuotaShrink } from "./quota-shrink.ts";
 import type { ReconcileStep } from "./reconcile-step.ts";
 import { SourceSetMirror } from "./source-set-mirror.ts";
 import { SyncReport } from "./sync-report.ts";
@@ -10,7 +11,7 @@ export class Reconciler {
   private readonly steps: ReadonlyArray<ReconcileStep>;
 
   public constructor(private readonly context: SyncContext) {
-    this.steps = [new SourceSetMirror(context), new TrendingFill(context)];
+    this.steps = [new QuotaShrink(context), new SourceSetMirror(context), new TrendingFill(context)];
   }
 
   public async reconcile(server: ServerId): Promise<SyncResult> {
