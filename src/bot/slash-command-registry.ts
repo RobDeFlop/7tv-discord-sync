@@ -79,14 +79,18 @@ export class SlashCommandRegistry {
             name: sub,
             description: command.description,
             type: ApplicationCommandOptionType.Subcommand,
-            options: command.options.map((o) => SlashCommandRegistry.option(o)),
+            options: SlashCommandRegistry.optionsOf(command),
           },
         ];
       } else {
-        def.options = command.options.map((o) => SlashCommandRegistry.option(o));
+        def.options = SlashCommandRegistry.optionsOf(command);
       }
     }
     return [...byName.values()];
+  }
+
+  private static optionsOf(command: SlashCommand): OptionDefinition[] {
+    return command.options.map((o) => SlashCommandRegistry.option(o));
   }
 
   private static option(o: SlashOption): OptionDefinition {

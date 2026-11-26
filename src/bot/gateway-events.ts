@@ -5,8 +5,8 @@ import type { FeedbackRouter } from "./feedback-router.ts";
 import type { ServerLock } from "./server-lock.ts";
 
 /** The Servers the bot is currently in. */
-export abstract class GuildDirectory {
-  public abstract guildIds(): ServerId[];
+export abstract class ServerDirectory {
+  public abstract serverIds(): ServerId[];
 }
 
 /**
@@ -21,16 +21,16 @@ export class GatewayEvents {
     private readonly store: StorePort,
     private readonly feedback: FeedbackRouter,
     private readonly lock: ServerLock,
-    private readonly guilds: GuildDirectory,
+    private readonly servers: ServerDirectory,
   ) {}
 
   /** The bot was added to a Server; reconcile registers its hand-made emojis as Reserved Slots. */
-  public guildJoined(server: ServerId): Promise<void> {
+  public serverJoined(server: ServerId): Promise<void> {
     return this.reconcile(server);
   }
 
   /** The bot was removed from a Server; forget everything about it. */
-  public guildLeft(server: ServerId): Promise<void> {
+  public serverLeft(server: ServerId): Promise<void> {
     return this.track(this.lock.run(server, () => this.store.remove(server)).catch((e) => this.report(server, e)));
   }
 
@@ -65,9 +65,9 @@ export class GatewayEvents {
 
   /** On startup: reconcile every Server the bot is in, and drop data of Servers it left while offline. */
   public async catchUp(): Promise<void> {
-    const present = new Set(this.guilds.guildIds());
+    const present = new Set(this.servers.serverIds());
     for (const server of await this.store.listServers()) {
-      if (!present.has(server)) await this.guildLeft(server);
+      if (!present.has(server)) await this.serverLeft(server);
     }
     await Promise.all([...present].map((server) => this.reconcile(server)));
   }

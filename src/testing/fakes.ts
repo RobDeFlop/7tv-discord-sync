@@ -1,6 +1,7 @@
 import {
   InvalidLinkError,
   MissingPermissionError,
+  ServerQuotas,
   ServerState,
   type DiscordEmoji,
   type EmojiImage,
@@ -62,6 +63,29 @@ export class FakeDiscord extends DiscordPort {
     this.server(id).boostLevel = boostLevel;
   }
 
+  private readonly createFailures = new Map<ServerId, { remaining: number; error: Error }>();
+
+  /** Let `successes` more creates work, then make every later create fail with `error`. */
+  public failCreatesAfter(id: ServerId, successes: number, error: Error): void {
+    this.createFailures.set(id, { remaining: successes, error });
+  }
+
+  private quotaLookupCount = 0;
+
+  /** How often slot limits were looked up. */
+  public get quotaLookups(): number {
+    return this.quotaLookupCount;
+  }
+
+  public override async getQuotas(id: ServerId): Promise<ServerQuotas> {
+    this.quotaLookupCount++;
+    return super.getQuotas(id);
+  }
+
+  public override async hasManageExpressions(id: ServerId): Promise<boolean> {
+    return this.server(id).canManage;
+  }
+
   /** Add an emoji as if an admin uploaded it by hand. Returns it. */
   public seedEmoji(id: ServerId, emoji: { name: string; animated: boolean }): DiscordEmoji {
     const created = { id: `emoji-${this.nextId++}`, ...emoji };
@@ -91,7 +115,12 @@ export class FakeDiscord extends DiscordPort {
   public async createEmoji(id: ServerId, emoji: { name: string; image: EmojiImage }): Promise<DiscordEmoji> {
     const s = this.server(id);
     this.assertCanManage(id);
-    const limit =(await this.getQuotas(id)).limit(emoji.image.animated ? "animated" : "static");
+    const failure = this.createFailures.get(id);
+    if (failure) {
+      if (failure.remaining <= 0) throw failure.error;
+      failure.remaining--;
+    }
+    const limit = new ServerQuotas(s.boostLevel).limit();
     const used = s.emojis.filter((e) => e.animated === emoji.image.animated).length;
     if (used >= limit) throw new Error("Maximum number of emojis reached");
     if (!/^[A-Za-z0-9_]{2,32}$/.test(emoji.name)) throw new Error(`Invalid emoji name: ${emoji.name}`);
@@ -206,7 +235,15 @@ export class FakeSevenTv extends SevenTvPort {
     return (this.trending.get(period) ?? []).slice(0, limit).map((id) => ({ ...this.emote(id) }));
   }
 
+  private readonly downloads = new Map<SevenTvEmoteId, number>();
+
+  /** How often an emote's image was downloaded. */
+  public downloadCount(id: SevenTvEmoteId): number {
+    return this.downloads.get(id) ?? 0;
+  }
+
   public async downloadImage(id: SevenTvEmoteId): Promise<ImageResult> {
+    this.downloads.set(id, this.downloadCount(id) + 1);
     const emote = this.emotes.get(id);
     if (!emote) return { ok: false, reason: "unavailable" };
     const size = this.imageSizes.get(id) ?? 0;

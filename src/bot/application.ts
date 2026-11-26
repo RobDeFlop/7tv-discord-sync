@@ -22,7 +22,7 @@ export class Application {
     const sevenTv = new SevenTvAdapter(new ImagePipeline());
     const core = new SyncCore(sevenTv, new DiscordJsAdapter(client), this.store);
     const feedback = new FeedbackRouter(this.store, DiscordBot.logChannel(client));
-    const events = new GatewayEvents(core, this.store, feedback, lock, DiscordBot.guilds(client));
+    const events = new GatewayEvents(core, this.store, feedback, lock, DiscordBot.servers(client));
     events.listenToSevenTv(sevenTv);
     this.bot = new DiscordBot(client, events, new SlashCommandRegistry(core, lock));
   }

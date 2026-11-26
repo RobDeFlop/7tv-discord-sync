@@ -17,7 +17,7 @@ export class DiscordAdapter extends DiscordPort {
     return this.queue.progress(server);
   }
 
-  public async hasManageExpressions(server: ServerId): Promise<boolean> {
+  public override async hasManageExpressions(server: ServerId): Promise<boolean> {
     return (await this.guilds.getGuild(server)).canManageExpressions();
   }
 

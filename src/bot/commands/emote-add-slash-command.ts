@@ -13,6 +13,6 @@ export class EmoteAddSlashCommand extends SlashCommand {
   ];
 
   protected run(server: ServerId, request: SlashRequest): Promise<string> {
-    return this.apply(server, new AddEmoteCommand(this.requiredString(request, "link"), request.string("name") ?? undefined));
+    return this.apply(server, new AddEmoteCommand(this.requiredString(request, "link"), request.stringOption("name") ?? undefined));
   }
 }

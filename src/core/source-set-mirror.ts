@@ -1,5 +1,6 @@
 import { EmoteNamer, ServerQuotas, type SevenTvEmote, type SyncResult } from "../domain/index.ts";
 import { ImageFailure } from "./image-failure.ts";
+import { NameCollision } from "./name-collision.ts";
 import { ReconcileStep } from "./reconcile-step.ts";
 import { SyncReport } from "./sync-report.ts";
 import type { SyncedServer } from "./synced-server.ts";
@@ -51,10 +52,15 @@ export class SourceSetMirror extends ReconcileStep {
       if (managed.tier === "trending") managed.promoteTo("source");
       if (managed.tier !== "source") continue;
       const emoji = synced.emojiOf(managed);
-      const { name } = EmoteNamer.unique(emote.name, synced.emojiNamesExcept(emoji.id));
-      if (name !== emoji.name) {
-        await synced.renameEmoji(emoji, name);
-        report.change({ type: "renamed", from: emoji.name, to: name });
+      const { name, suffixed } = EmoteNamer.unique(emote.name, synced.emojiNamesExcept(emoji.id));
+      if (name === emoji.name) continue;
+      await synced.renameEmoji(emoji, name);
+      report.change({ type: "renamed", from: emoji.name, to: name });
+      if (suffixed) {
+        const collision = NameCollision.onRename(emote.name, name, emote.id);
+        if (collision.record(synced.state)) report.say("warning", collision.text);
+      } else {
+        synced.state.clearProblem({ kind: "renamed-with-suffix", sevenTvEmoteId: emote.id });
       }
     }
   }
@@ -73,19 +79,13 @@ export class SourceSetMirror extends ReconcileStep {
       }
       const image = await this.context.sevenTv.downloadImage(emote.id);
       if (!image.ok) {
-        const failure = new ImageFailure(emote, image.reason);
-        const problem = failure.toProblem();
-        const known = state.hasProblem({ kind: problem.kind, sevenTvEmoteId: emote.id });
-        state.recordProblem(problem);
-        if (!known) report.say("warning", failure.text);
+        new ImageFailure(emote, image.reason).recordOnce(state, report);
         continue;
       }
       const placed = await this.context.allocator.place(synced, report, plan, emote, image.image, "source", emote.name);
       if (placed.suffixed) {
-        const text = `The name of ${emote.name} was taken, so it was added as ${placed.name}.`;
-        const known = state.hasProblem({ kind: "renamed-with-suffix", message: text });
-        state.recordProblem({ kind: "renamed-with-suffix", message: text, sevenTvEmoteId: emote.id });
-        if (!known) report.say("warning", text);
+        const collision = NameCollision.onAdd(emote.name, placed.name, emote.id);
+        if (collision.record(state)) report.say("warning", collision.text);
       }
     }
     return pending;

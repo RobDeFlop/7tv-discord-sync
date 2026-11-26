@@ -119,6 +119,8 @@ export interface WriteQueueProgress {
 }
 
 export interface ServerStatus {
+  /** False when the bot lacks Manage Expressions and so cannot change emojis. */
+  manageExpressions: boolean;
   writeQueue: WriteQueueProgress;
   quotas: Record<Quota, TierUsage>;
   problems: Problem[];

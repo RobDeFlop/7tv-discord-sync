@@ -21,12 +21,12 @@ class FakeRequest extends SlashRequest {
     super();
   }
 
-  public string(name: string): string | null {
+  public stringOption(name: string): string | null {
     const v = this.options[name];
     return typeof v === "string" ? v : null;
   }
 
-  public boolean(name: string): boolean | null {
+  public booleanOption(name: string): boolean | null {
     const v = this.options[name];
     return typeof v === "boolean" ? v : null;
   }
