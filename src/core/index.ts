@@ -11,9 +11,9 @@ import {
   type Quota,
 } from "../domain/index.ts";
 import type { DiscordPort, SevenTvPort, StorePort } from "../ports/index.ts";
-import type { PreparedEmoteAdd } from "./commands/add-emote-command.ts";
 import { LinkSourceSetCommand } from "./commands/link-source-set-command.ts";
 import type { Command } from "./commands/command.ts";
+import { PreparedEmotePromotion, PreparedEmoteUpload, type PreparedEmoteAdd } from "./commands/prepared-emote-add.ts";
 import { ImageFailure } from "./image-failure.ts";
 import { SyncContext } from "./sync-context.ts";
 import type { SyncedServer } from "./synced-server.ts";
@@ -56,7 +56,7 @@ export class SyncCore {
         if (previewImage) return {
           originalName: emote.name,
           previewImage,
-          prepared: { emote, defaultName: existing.name, intent: "promotion-only", discordEmojiId: existing.id },
+          prepared: new PreparedEmotePromotion(emote, existing.name, existing.id),
         };
       }
       if (result.reason === "too-large") return { originalName: emote.name, previewImage: result.previewImage, importFailure: result.reason };
@@ -68,12 +68,8 @@ export class SyncCore {
       const plan = await this.context.allocator.plan(synced, ServerQuotas.quotaOf(emote.animated), "requested");
       defaultName = this.context.allocator.placementName(synced, emote.name, plan.ok ? plan.displace : null).name;
     }
-    const uploadImage = result.image;
-    return {
-      originalName: emote.name,
-      previewImage: { animated: uploadImage.animated, bytes: new Uint8Array(uploadImage.bytes) },
-      prepared: { emote, defaultName, intent: "seven-tv-upload", uploadImage },
-    };
+    const prepared = new PreparedEmoteUpload(emote, defaultName, result.image);
+    return { originalName: emote.name, previewImage: prepared.uploadImage, prepared };
   }
 
   /** Apply an admin command to a Server. Domain errors come back as feedback. */

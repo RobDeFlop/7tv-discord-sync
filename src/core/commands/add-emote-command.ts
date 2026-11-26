@@ -5,8 +5,6 @@ import {
   EmoteNamer,
   QuotaFullError,
   ServerQuotas,
-  type DiscordEmojiId,
-  type EmojiImage,
   type ManagedEmote,
   type ServerId,
   type SevenTvEmote,
@@ -19,33 +17,12 @@ import { SyncReport } from "../sync-report.ts";
 import type { SyncContext } from "../sync-context.ts";
 import type { SyncedServer } from "../synced-server.ts";
 import { Command } from "./command.ts";
-
-export type PreparedEmoteAdd = {
-  emote: SevenTvEmote;
-  defaultName: string;
-} & (
-  | { intent: "seven-tv-upload"; uploadImage: EmojiImage }
-  | { intent: "promotion-only"; discordEmojiId: DiscordEmojiId }
-);
+import { PreparedEmotePromotion, type PreparedEmoteAdd, type PreparedEmoteUpload } from "./prepared-emote-add.ts";
 
 /** Add a 7TV emote as a Requested Emote. */
 export class AddEmoteCommand extends Command {
-  private readonly source: string | PreparedEmoteAdd;
-
-  public constructor(source: string | PreparedEmoteAdd, private readonly name?: string) {
+  public constructor(private readonly source: string | PreparedEmoteAdd, private readonly name?: string) {
     super();
-    if (typeof source === "string") {
-      this.source = source;
-    } else {
-      const prepared = { emote: { ...source.emote }, defaultName: source.defaultName };
-      this.source = source.intent === "promotion-only" ? {
-        ...prepared, intent: source.intent, discordEmojiId: source.discordEmojiId,
-      } : {
-        ...prepared,
-        intent: source.intent,
-        uploadImage: { animated: source.uploadImage.animated, bytes: new Uint8Array(source.uploadImage.bytes) },
-      };
-    }
   }
 
   public async execute(server: ServerId, context: SyncContext): Promise<SyncResult> {
@@ -54,7 +31,7 @@ export class AddEmoteCommand extends Command {
     const synced = await context.load(server);
     try {
       const existing = synced.state.findManaged(emote.id);
-      if (typeof source !== "string" && source.intent === "promotion-only") {
+      if (source instanceof PreparedEmotePromotion) {
         if (!existing || existing.discordEmojiId !== source.discordEmojiId) throw new EmoteAddPromotionUnavailableError();
         return await this.promote(synced, emote, existing);
       }
@@ -102,7 +79,7 @@ export class AddEmoteCommand extends Command {
     context: SyncContext,
     synced: SyncedServer,
     emote: SevenTvEmote,
-    source: string | Extract<PreparedEmoteAdd, { intent: "seven-tv-upload" }>,
+    source: string | PreparedEmoteUpload,
   ): Promise<SyncResult> {
     const { state } = synced;
     const quota = ServerQuotas.quotaOf(emote.animated);
