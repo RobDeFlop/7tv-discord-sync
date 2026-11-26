@@ -14,7 +14,10 @@ export class SourceSetMirror extends ReconcileStep {
   public async run(synced: SyncedServer): Promise<SyncResult> {
     const { state } = synced;
     const report = new SyncReport();
-    if (!state.linkedUserId) return report.toResult();
+    if (!state.linkedUserId) {
+      state.clearPending();
+      return report.toResult();
+    }
 
     const user = await this.context.sevenTv.getUser(state.linkedUserId);
     if (!user) {

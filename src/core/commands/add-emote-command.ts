@@ -1,4 +1,5 @@
 import {
+  DisplacementError,
   EmoteNamer,
   QuotaFullError,
   ServerQuotas,
@@ -7,6 +8,7 @@ import {
   type SevenTvEmote,
   type SyncResult,
 } from "../../domain/index.ts";
+import type { Placement } from "../slot-allocator.ts";
 import { ImageFailure } from "../image-failure.ts";
 import { NameCollision } from "../name-collision.ts";
 import { SyncReport } from "../sync-report.ts";
@@ -79,7 +81,14 @@ export class AddEmoteCommand extends Command {
 
     const report = new SyncReport();
     const wanted = this.name ?? emote.name;
-    const placed = await context.allocator.place(synced, report, plan, emote, image.image, "requested", wanted);
+    let placed: Placement;
+    try {
+      placed = await context.allocator.place(synced, report, plan, emote, image.image, "requested", wanted);
+    } catch (error) {
+      if (!(error instanceof DisplacementError)) throw error;
+      report.say("error", error.toFeedback().text);
+      return report.toResult();
+    }
     state.addRequestedEmote({ sevenTvEmoteId: emote.id, requestedName: this.name });
     if (placed.suffixed) {
       const collision = NameCollision.onAdd(wanted, placed.name, emote.id);
