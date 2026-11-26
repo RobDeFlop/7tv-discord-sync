@@ -1,34 +1,83 @@
 # 7tv-discord-sync
 
-Keeps a Discord server's emojis in sync with emotes from 7TV (one way, 7TV to Discord). See `GLOSSARY.md` for the vocabulary.
+A Discord bot that keeps a server's emojis in sync with emotes from [7TV](https://7tv.app). Sync is one-way, from 7TV to Discord. See `GLOSSARY.md` for the vocabulary.
+
+- Mirror a 7TV user's active emote set and follow it when they switch sets.
+- Add single 7TV emotes by link.
+- Optionally fill leftover slots with trending emotes.
+- Emojis you uploaded yourself are never touched.
+
+## Requirements
+
+- [Bun](https://bun.sh) 1.4 or newer
+- A Postgres database (local or hosted, e.g. Neon or Supabase)
+- A Discord application with a bot
 
 ## Setup
 
-You need [Bun](https://bun.sh), a Postgres database and a Discord application with a bot.
+### 1. Get the code
 
-1. Create an application at the [Discord developer portal](https://discord.com/developers/applications), add a bot, and copy its token.
-2. Invite the bot to your server with the `bot` and `applications.commands` scopes and the **Manage Expressions** permission (needed to add, rename and remove emojis). It also needs to see and post in the log channel you pick. No privileged intents are required.
-3. Install and configure:
+```sh
+git clone https://github.com/RobDeFlop/7tv-discord-sync.git
+cd 7tv-discord-sync
+bun install
+```
 
-   ```sh
-   bun install
-   export DISCORD_TOKEN=...                       # bot token
-   export DATABASE_URL=postgres://user:pass@host:5432/dbname
-   ```
+### 2. Create the Discord bot
 
-4. Run it:
+1. Open the [Discord developer portal](https://discord.com/developers/applications) and click **New Application**.
+2. Open the **Bot** tab, click **Reset Token** and copy the token. Keep it secret.
+3. No privileged intents are needed. Leave Message Content, Server Members and Presence off.
 
-   ```sh
-   bun run start
-   ```
+### 3. Invite the bot to your server
 
-   On startup the bot applies the database migrations, registers its slash commands and reconciles every server it is in.
+Copy the **Application ID** from **General Information**, put it into this URL and open it:
 
-Other scripts: `bun test`, `bun run typecheck`.
+```
+https://discord.com/oauth2/authorize?client_id=YOUR_APPLICATION_ID&scope=bot+applications.commands&permissions=1073744896
+```
 
-## Commands
+This grants **Manage Expressions** (to add, rename and remove emojis), **View Channel** and **Send Messages** (for the log channel). Make sure the bot can see and post in the channel you'll use as the log channel.
 
-All commands are for administrators and answer only to you (ephemeral).
+### 4. Set up a database
+
+Any Postgres database works. Create an empty database, for example `7tv_sync`, and note its connection string. The bot creates its tables itself on startup.
+
+### 5. Configure
+
+Copy the example file and fill in your values:
+
+```sh
+cp .example.env .env
+```
+
+| Variable | Value |
+| --- | --- |
+| `DISCORD_TOKEN` | The bot token from step 2 |
+| `DATABASE_URL` | Your Postgres connection string, e.g. `postgres://user:password@localhost:5432/7tv_sync` |
+
+Bun loads `.env` automatically. `.env` is gitignored, so your token is never committed.
+
+### 6. Run
+
+```sh
+bun run start
+```
+
+On startup the bot applies the database migrations, registers its slash commands and syncs every server it is in. Slash commands are registered globally, so the first time they can take a few minutes to show up in Discord.
+
+## Using the bot
+
+All commands are for administrators only, and only you see the replies.
+
+A typical first setup:
+
+1. `/config log-channel #bot-log`: where messages from automatic syncs are posted.
+2. `/set link https://7tv.app/users/<id>`: mirror that user's active emote set.
+3. `/trending on`: optionally fill the remaining free slots with trending emotes.
+4. `/status`: check slot usage and any problems.
+
+### Commands
 
 | Command | What it does |
 | --- | --- |
@@ -36,9 +85,32 @@ All commands are for administrators and answer only to you (ephemeral).
 | `/emote remove <name>` | Remove an emoji the bot created |
 | `/set link <7tv user link>` | Mirror that user's active emote set (Source Set) |
 | `/set unlink <delete\|keep>` | Stop mirroring; delete the emotes or keep them as Reserved Slots |
-| `/trending <on\|off> [period]` | Fill free slots with trending emotes (day, week, month, all-time) |
-| `/sync` | Reconcile now |
+| `/trending <on\|off> [period]` | Fill free slots with trending emotes (day, week, month, all-time; default week) |
+| `/sync` | Sync now |
 | `/status` | Slot usage, settings, problems and pending Discord writes |
 | `/config log-channel <channel>` | Where automatic sync messages are posted |
 
-The bot also syncs on its own: when it joins a server, when emojis change, when the boost level changes, when the linked 7TV set changes, and once for every server at startup. Messages from those syncs go to the log channel if one is set; problems are always shown in `/status`. Leaving a server deletes its stored data.
+### How slots are shared
+
+Discord limits static and animated emojis separately (50, 100, 150 or 250 each, depending on boost level). When slots run out, they go in this order:
+
+1. Emojis you uploaded yourself (never changed by the bot)
+2. Emotes added with `/emote add`
+3. The mirrored 7TV set
+4. Trending emotes
+
+An emote higher in the list pushes out one lower in the list. Animated emotes are converted and shrunk to fit Discord's 256 KB limit; an emote that can't be shrunk enough is skipped and listed in `/status`.
+
+### Automatic syncs
+
+The bot also syncs on its own when it joins a server, when emojis change, when the boost level changes, when the linked 7TV set changes, and once for every server at startup. Messages from those syncs go to the log channel if one is set. Problems are always shown in `/status`. Removing the bot from a server deletes that server's stored data; the emojis stay.
+
+## Development
+
+```sh
+bun test            # run the tests
+bun run typecheck   # type-check
+bun run db:generate # regenerate migrations after a schema change (needs DATABASE_URL)
+```
+
+Coding standards are in `docs/agents/coding-standards.md`.
