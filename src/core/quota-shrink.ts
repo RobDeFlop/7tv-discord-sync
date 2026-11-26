@@ -15,7 +15,7 @@ export class QuotaShrink extends ReconcileStep {
     const report = new SyncReport();
     const quotas = await synced.quotas();
     for (const quota of ServerQuotas.ALL) {
-      await this.shrink(synced, report, quota, synced.usedIn(quota) - quotas.limit(quota));
+      await this.shrink(synced, report, quota, synced.usedIn(quota) - quotas.limit());
     }
     return report.toResult();
   }

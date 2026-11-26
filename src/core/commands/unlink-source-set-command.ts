@@ -1,11 +1,11 @@
-import type { Change, ServerId, SyncResult } from "../../domain/index.ts";
+import type { ServerId, SyncResult } from "../../domain/index.ts";
 import { SyncReport } from "../sync-report.ts";
 import type { SyncContext } from "../sync-context.ts";
 import { Command } from "./command.ts";
 
 /** Unlink the 7TV user, either deleting the Source Set's emotes or keeping them as Reserved Slots. */
 export class UnlinkSourceSetCommand extends Command {
-  public constructor(private readonly keepEmotes: boolean) {
+  public constructor(private readonly keepAsReserved: boolean) {
     super();
   }
 
@@ -14,25 +14,28 @@ export class UnlinkSourceSetCommand extends Command {
     const { state } = synced;
     if (!state.linkedUserId) return SyncReport.single("error", "No 7TV user is linked to this Server.");
 
-    const changes: Change[] = [];
+    const report = new SyncReport();
     const sourced = state.managedOfTier("source");
-    for (const managed of sourced) {
-      const emoji = synced.emojiOf(managed);
-      if (this.keepEmotes) {
-        changes.push({ type: "reserved", name: emoji.name });
-      } else {
-        await synced.deleteEmoji(emoji);
-        changes.push({ type: "deleted", name: emoji.name, reason: "unlinked" });
+    try {
+      for (const managed of sourced) {
+        const emoji = synced.emojiOf(managed);
+        if (this.keepAsReserved) {
+          report.change({ type: "reserved", name: emoji.name });
+        } else {
+          await synced.deleteEmoji(emoji);
+          report.change({ type: "deleted", name: emoji.name, reason: "unlinked" });
+        }
       }
+      state.unlinkSource(this.keepAsReserved);
+    } finally {
+      await context.store.save(server, state);
     }
-    // Kept emotes simply stop being Managed Emotes; ownership sync makes them Reserved Slots.
-    state.releaseManagedOfTier("source");
-    state.unlinkUser();
-    state.clearPending();
-    await context.store.save(server, state);
-    const text = this.keepEmotes
-      ? `Unlinked. ${sourced.length} emotes were kept as Reserved Slots.`
-      : `Unlinked. ${sourced.length} emotes were deleted.`;
-    return { changes, feedback: [{ level: "info", text }] };
+    report.say(
+      "info",
+      this.keepAsReserved
+        ? `Unlinked. ${sourced.length} emotes were kept as Reserved Slots.`
+        : `Unlinked. ${sourced.length} emotes were deleted.`,
+    );
+    return report.toResult();
   }
 }

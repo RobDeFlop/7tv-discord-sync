@@ -120,7 +120,7 @@ export class FakeDiscord extends DiscordPort {
       if (failure.remaining <= 0) throw failure.error;
       failure.remaining--;
     }
-    const limit = new ServerQuotas(s.boostLevel).limit(emoji.image.animated ? "animated" : "static");
+    const limit = new ServerQuotas(s.boostLevel).limit();
     const used = s.emojis.filter((e) => e.animated === emoji.image.animated).length;
     if (used >= limit) throw new Error("Maximum number of emojis reached");
     if (!/^[A-Za-z0-9_]{2,32}$/.test(emoji.name)) throw new Error(`Invalid emoji name: ${emoji.name}`);

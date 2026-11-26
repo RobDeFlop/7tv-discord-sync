@@ -64,7 +64,7 @@ export class SyncCore {
     for (const e of inQuota) byTier[tierOf.get(e.id) ?? "reserved"]++;
     return {
       used: inQuota.length,
-      free: Math.max(0, quotas.limit(quota) - inQuota.length),
+      free: Math.max(0, quotas.limit() - inQuota.length),
       byTier,
     };
   }

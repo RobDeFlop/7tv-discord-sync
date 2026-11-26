@@ -1,5 +1,5 @@
 import type { Quota } from "./quota.ts";
-import { Precedence, type ManagedTier, type Tier } from "./tier.ts";
+import type { ManagedTier, Tier } from "./tier.ts";
 import type {
   DiscordEmojiId,
   ManagedEmoteSnapshot,
@@ -14,16 +14,19 @@ export abstract class SlotOccupant {
     public readonly quota: Quota,
   ) {}
 
+  /** Precedence, highest first: Reserved Slots, Requested Emotes, Source Set, Trending Fill. */
+  private static readonly RANK: Readonly<Record<Tier, number>> = { reserved: 0, requested: 1, source: 2, trending: 3 };
+
   public abstract get tier(): Tier;
 
   /** Higher number = lower Precedence = displaced sooner. */
   public get rank(): number {
-    return Precedence.rankOf(this.tier);
+    return SlotOccupant.RANK[this.tier];
   }
 
   /** Displacement: only strictly lower Precedence loses its slot. Reserved Slots rank highest, so never. */
   public canBeDisplacedBy(incoming: ManagedTier): boolean {
-    return this.rank > Precedence.rankOf(incoming);
+    return this.rank > SlotOccupant.RANK[incoming];
   }
 }
 

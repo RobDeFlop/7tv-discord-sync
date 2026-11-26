@@ -3,7 +3,7 @@ import { ConfigureLogChannelCommand, LinkSourceSetCommand, SyncCore } from "../c
 import type { ServerId } from "../domain/index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
 import { FeedbackRouter, LogChannel } from "./feedback-router.ts";
-import { GatewayEvents, GuildDirectory } from "./gateway-events.ts";
+import { GatewayEvents, ServerDirectory } from "./gateway-events.ts";
 import { ServerLock } from "./server-lock.ts";
 
 class FakeLogChannel extends LogChannel {
@@ -16,10 +16,10 @@ class FakeLogChannel extends LogChannel {
   }
 }
 
-class FakeGuilds extends GuildDirectory {
+class FakeServers extends ServerDirectory {
   public ids: ServerId[] = [];
 
-  public guildIds(): ServerId[] {
+  public serverIds(): ServerId[] {
     return [...this.ids];
   }
 }
@@ -33,22 +33,22 @@ function setup() {
   const store = new FakeStore();
   const core = new SyncCore(sevenTv, discord, store);
   const log = new FakeLogChannel();
-  const guilds = new FakeGuilds();
-  const events = new GatewayEvents(core, store, new FeedbackRouter(store, log), new ServerLock(), guilds);
+  const servers = new FakeServers();
+  const events = new GatewayEvents(core, store, new FeedbackRouter(store, log), new ServerLock(), servers);
   for (const id of [A, B]) discord.addServer(id);
   sevenTv.addUser({ id: "u1", username: "streamer", activeSetId: "setA" });
   sevenTv.addEmote({ id: "e1", name: "Pog", animated: false });
   sevenTv.setEmotes("setA", "A", ["e1"]);
   const link = (server: ServerId) => core.apply(server, new LinkSourceSetCommand("https://7tv.app/users/u1"));
   const names = (server: ServerId) => discord.emojis(server).map((e) => e.name);
-  return { discord, sevenTv, store, core, log, guilds, events, link, names };
+  return { discord, sevenTv, store, core, log, servers, events, link, names };
 }
 
-describe("guild events", () => {
+describe("server events", () => {
   test("joining a Server registers hand-made emojis as Reserved Slots", async () => {
     const { discord, core, events } = setup();
     discord.seedEmoji(A, { name: "hand", animated: false });
-    await events.guildJoined(A);
+    await events.serverJoined(A);
     expect((await core.status(A)).quotas.static.byTier.reserved).toBe(1);
   });
 
@@ -56,7 +56,7 @@ describe("guild events", () => {
     const { store, events, link } = setup();
     await link(A);
     expect(await store.listServers()).toContain(A);
-    await events.guildLeft(A);
+    await events.serverLeft(A);
     expect(await store.listServers()).not.toContain(A);
   });
 
@@ -70,7 +70,7 @@ describe("guild events", () => {
 
   test("a boost level change reconciles the Server", async () => {
     const { discord, core, events } = setup();
-    await events.guildJoined(A);
+    await events.serverJoined(A);
     discord.setBoostLevel(A, 1);
     await events.boostChanged(A);
     expect((await core.status(A)).quotas.static.free).toBe(100);
@@ -78,7 +78,7 @@ describe("guild events", () => {
 
   test("an unexpected failure is contained, not thrown to the gateway", async () => {
     const { events } = setup();
-    await events.guildJoined("unknown-server"); // fake discord throws for unknown servers
+    await events.serverJoined("unknown-server"); // fake discord throws for unknown servers
   });
 });
 
@@ -119,11 +119,11 @@ describe("7TV changes", () => {
 
 describe("catch-up", () => {
   test("reconciles every Server the bot is in, and drops data of Servers it left while offline", async () => {
-    const { discord, store, core, guilds, events, link, names } = setup();
+    const { discord, store, core, servers, events, link, names } = setup();
     await link(A);
     await link(B);
     discord.removeEmojiByHand(A, discord.emojis(A)[0]!.id);
-    guilds.ids = [A]; // B was left while the bot was offline
+    servers.ids = [A]; // B was left while the bot was offline
     await events.catchUp();
     expect(names(A)).toEqual(["Pog"]);
     expect(await store.listServers()).not.toContain(B);
@@ -131,10 +131,10 @@ describe("catch-up", () => {
   });
 
   test("a failing Server does not stop the others", async () => {
-    const { guilds, events, link, names, discord } = setup();
+    const { servers, events, link, names, discord } = setup();
     await link(A);
     discord.removeEmojiByHand(A, discord.emojis(A)[0]!.id);
-    guilds.ids = ["unknown-server", A];
+    servers.ids = ["unknown-server", A];
     await events.catchUp();
     expect(names(A)).toEqual(["Pog"]);
   });

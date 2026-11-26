@@ -80,8 +80,7 @@ describe("DiscordAdapter", () => {
       const { adapter } = setup({ s: fakeGuild({ premiumTier: tier }).guild });
       const quotas = await adapter.getQuotas("s");
       expect(quotas.boostLevel).toBe(tier);
-      expect(quotas.limit("static")).toBe(limit);
-      expect(quotas.limit("animated")).toBe(limit);
+      expect(quotas.limit()).toBe(limit);
     }
   });
 
