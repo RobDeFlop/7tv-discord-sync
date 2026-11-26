@@ -195,6 +195,20 @@ export class ServerState {
   }
 
   /**
+   * The `count` Managed Emotes of `quota` to give up first when it shrinks:
+   * lowest Precedence first, most recently added first within a tier. Reserved
+   * Slots are never listed, so fewer than `count` may come back.
+   */
+  public lowestPrecedence(quota: Quota, count: number): ManagedEmote[] {
+    return this.managed
+      .map((m, index) => ({ m, index }))
+      .filter(({ m }) => m.quota === quota)
+      .sort((a, b) => b.m.rank - a.m.rank || b.index - a.index)
+      .slice(0, Math.max(0, count))
+      .map(({ m }) => m);
+  }
+
+  /**
    * Decide how an emote of `tier` gets a slot in `quota`: a free slot, or by
    * displacing the lowest-Precedence Managed Emote strictly below `tier` in the
    * same quota (ties: most recently added goes first). Reserved Slots and equal
