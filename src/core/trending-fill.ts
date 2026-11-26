@@ -38,15 +38,10 @@ export class TrendingFill extends ReconcileStep {
     const trending = await this.context.sevenTv.getTrending(state.trending.period, TrendingFill.CANDIDATES);
     for (const emote of trending) {
       if (state.findManaged(emote.id)) continue;
+      if (ImageFailure.confirmKnown(state, emote.id)) continue;
       const quota = ServerQuotas.quotaOf(emote.animated);
       const plan = await this.context.allocator.plan(synced, quota, "trending");
       if (!plan.ok || plan.displace) continue; // only genuinely free slots
-      // An emote known to be too large stays too large: do not download it again.
-      const tooLarge = { kind: "too-large", sevenTvEmoteId: emote.id } as const;
-      if (state.hasProblem(tooLarge)) {
-        state.confirmProblem(tooLarge);
-        continue;
-      }
       const image = await this.context.sevenTv.downloadImage(emote.id);
       if (!image.ok) {
         new ImageFailure(emote, image.reason).recordOnce(state, report);
