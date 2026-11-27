@@ -1,26 +1,32 @@
-const levels = ["debug", "info", "warn", "error"] as const;
-type Level = typeof levels[number];
+enum LogLevel {
+  Debug = "debug",
+  Info = "info",
+  Warn = "warn",
+  Error = "error",
+}
+
+const levels = Object.values(LogLevel); // Lowest to highest severity.
 
 /** Strings in the message position are display text. Pass caught values separately. */
 export class Logger {
   public static debug(message: string | object, ...data: unknown[]): void {
-    Logger.write("debug", message, data);
+    Logger.write(LogLevel.Debug, message, data);
   }
 
   public static info(message: string | object, ...data: unknown[]): void {
-    Logger.write("info", message, data);
+    Logger.write(LogLevel.Info, message, data);
   }
 
   public static warn(message: string | object, ...data: unknown[]): void {
-    Logger.write("warn", message, data);
+    Logger.write(LogLevel.Warn, message, data);
   }
 
   public static error(message: string | object, ...data: unknown[]): void {
-    Logger.write("error", message, data);
+    Logger.write(LogLevel.Error, message, data);
   }
 
-  private static write(level: Level, message: string | object, data: unknown[]): void {
-    const minimum = levels.find((candidate) => candidate === process.env.LOG_LEVEL) ?? "info";
+  private static write(level: LogLevel, message: string | object, data: unknown[]): void {
+    const minimum = levels.find((candidate) => candidate === process.env.LOG_LEVEL) ?? LogLevel.Info;
     if (levels.indexOf(level) < levels.indexOf(minimum)) return;
 
     const parts = typeof message === "string" ? [message] : [];
