@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { SetTrendingCommand, SyncCore } from "./index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
+import { addRequestedEmote } from "../testing/requested-emotes.ts";
 
 const S = "server-1";
 const userLink = "https://7tv.app/users/u1";
@@ -150,7 +151,7 @@ describe("removing a mirrored emote", () => {
   test("warns when a removed Requested Emote is still in the active Source Set", async () => {
     const { sevenTv, core, emotes, names } = setup();
     emotes(["r"]);
-    await core.addEmote(S, "https://7tv.app/emotes/r", "mine");
+    await addRequestedEmote(core, S, "r", "mine");
     sevenTv.setEmotes("setA", "Main", ["r"]);
     await core.linkSourceSet(S, userLink);
     const result = await core.removeEmote(S, "mine");
@@ -163,7 +164,7 @@ describe("removing a mirrored emote", () => {
   test("a Requested Emote removal needs no warning", async () => {
     const { core, emotes } = setup();
     emotes(["r"]);
-    await core.addEmote(S, "https://7tv.app/emotes/r");
+    await addRequestedEmote(core, S, "r");
     const r = await core.removeEmote(S, "RR");
     expect(r.feedback.map((f) => f.text)).toEqual(["Removed RR."]);
   });

@@ -1,12 +1,8 @@
 import { expect, test } from "bun:test";
 import {
-  AddEmoteCommand,
   ConfigureLogChannelCommand,
-  LinkSourceSetCommand,
   PreparedEmoteUpload,
-  RemoveEmoteCommand,
   SyncCore,
-  UnlinkSourceSetCommand,
 } from "./index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore, MAX_EMOJI_BYTES } from "../testing/fakes.ts";
 

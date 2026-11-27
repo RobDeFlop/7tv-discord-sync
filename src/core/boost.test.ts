@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { SetTrendingCommand, SyncCore } from "./index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
+import { addRequestedEmote } from "../testing/requested-emotes.ts";
 
 const S = "server-1";
-const link = (id: string) => `https://7tv.app/emotes/${id}`;
 
 function setup(boostLevel: number) {
   const discord = new FakeDiscord();
@@ -57,7 +57,7 @@ describe("boost level drops", () => {
   test("Requested Emotes go only when nothing of lower Precedence is left; Reserved Slots never", async () => {
     const { discord, sevenTv, core, emotes, named, hand } = setup(1);
     hand(30);
-    for (const id of emotes("req", 30)) await core.addEmote(S, link(id));
+    for (const id of emotes("req", 30)) await addRequestedEmote(core, S, id);
     const source = emotes("src", 40);
     sevenTv.setEmotes("setA", "A", source);
     await core.linkSourceSet(S, `https://7tv.app/users/u1`);
@@ -137,7 +137,7 @@ describe("missing Manage Expressions", () => {
     const { discord, sevenTv, core } = setup(0);
     sevenTv.addEmote({ id: "e1", name: "Pog", animated: false });
     discord.revokeManageExpressions(S);
-    const r = await core.addEmote(S, link("e1"));
+    const r = await addRequestedEmote(core, S, "e1");
     expect(r.feedback.some((f) => f.level === "error" && /Manage Expressions/.test(f.text))).toBe(true);
   });
 });

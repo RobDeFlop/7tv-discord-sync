@@ -10,18 +10,18 @@ import {
   type TierUsage,
   type Quota,
 } from "../domain/index.ts";
-import { RateLimitError, type DiscordPort, type SevenTvChange, type SevenTvPort, type StorePort } from "../ports/index.ts";
+import { RateLimitError, type DiscordPort, type ImageResult, type SevenTvChange, type SevenTvPort, type StorePort } from "../ports/index.ts";
+import { Logger, LogLevel } from "../logger.ts";
 import { AddEmoteCommand } from "./commands/add-emote-command.ts";
 import { RemoveEmoteCommand } from "./commands/remove-emote-command.ts";
 import { LinkSourceSetCommand } from "./commands/link-source-set-command.ts";
 import type { Command } from "./commands/command.ts";
 import { PreparedEmotePromotion, PreparedEmoteUpload, type PreparedEmoteAdd } from "./commands/prepared-emote-add.ts";
-import { ImageFailure } from "./image-failure.ts";
 import { QuotaShrink } from "./quota-shrink.ts";
 import { Reconciler } from "./reconciler.ts";
 import { ServerLock } from "./server-lock.ts";
 import { ServerSession } from "./server-session.ts";
-import { SlotAllocator } from "./slot-allocator.ts";
+import { SlotAcquisition } from "./slot-acquisition.ts";
 import { SourceSetMirror } from "./source-set-mirror.ts";
 import { TrendingFill } from "./trending-fill.ts";
 import { SyncReport } from "./sync-report.ts";
@@ -38,11 +38,15 @@ export type EmoteAddPreparation =
   ))
   | { feedback: FeedbackMessage };
 
+export interface EmoteAddConfirmation extends SyncResult {
+  feedback: (FeedbackMessage & { retry?: string })[];
+}
+
 /** The sync core's public interface. */
 export class SyncCore {
   private readonly lock = new ServerLock();
   private readonly session: ServerSession;
-  private readonly allocator = new SlotAllocator();
+  private readonly allocator: SlotAcquisition;
   private readonly scheduler: SyncScheduler;
   private readonly commandTasks = new Set<Promise<unknown>>();
   private stopping = false;
@@ -54,6 +58,7 @@ export class SyncCore {
     onSyncFailure: SyncFailure = () => {},
   ) {
     this.session = new ServerSession(discord, store);
+    this.allocator = new SlotAcquisition(sevenTv);
     const reconciler = new Reconciler([
       new QuotaShrink(), new SourceSetMirror(sevenTv, this.allocator), new TrendingFill(sevenTv, this.allocator),
     ]);
@@ -70,7 +75,8 @@ export class SyncCore {
     let emote: SevenTvEmote | null;
     try {
       emote = await this.sevenTv.findEmoteByExactName(name);
-    } catch {
+    } catch (error) {
+      Logger.write(LogLevel.warn, `emote_search_unavailable operation=prepare_preview server=${Logger.field(server)} ${Logger.failure(error)}`);
       return { feedback: { level: "error", text: "Could not search 7TV. Try again in a moment." } };
     }
     if (!emote) return { feedback: { level: "info", text: "No exact emote name matched your search on 7TV." } };
@@ -81,9 +87,10 @@ export class SyncCore {
     const synced = await this.session.load(server);
     const managed = synced.state.findManaged(emote.id);
     const existing = managed ? synced.emojiOf(managed) : undefined;
-    const result = await this.sevenTv.downloadImage(emote.id).catch((error: unknown) => {
+    const result = await this.sevenTv.downloadImage(emote.id).catch((error: unknown): ImageResult => {
       if (!existing) throw error;
-      return { ok: false, reason: "unavailable" } as const;
+      Logger.write(LogLevel.warn, `emote_image_fallback operation=prepare_preview server=${Logger.field(server)} emote=${Logger.field(emote.id)} ${Logger.failure(error)}`);
+      return { ok: false, reason: "unavailable" };
     });
     if (!result.ok) {
       if (existing) {
@@ -97,28 +104,39 @@ export class SyncCore {
       if ("previewImage" in result) {
         return { emote, previewImage: result.previewImage, importFailure: result.reason };
       }
-      return { feedback: { level: "error", text: `Could not preview this emote. ${new ImageFailure(emote, result.reason).text}` } };
+      const { message } = SlotAcquisition.imageFailure(emote, result.reason);
+      return { feedback: { level: "error", text: `Could not preview this emote. ${message}` } };
     }
 
-    let slotNotice: string | undefined;
-    let defaultName = existing?.name;
-    if (defaultName === undefined) {
-      const quota = ServerQuotas.quotaOf(emote.animated);
-      const plan = await this.allocator.plan(synced, quota, "requested");
-      if (!plan.ok) slotNotice = `The ${quota} quota is full. No Managed Emote is eligible for displacement.`;
-      else if (plan.displace) slotNotice = `The ${quota} quota is full. Adding this emote could remove a lower-precedence Managed Emote.`;
-      defaultName = this.allocator.placementName(synced, emote.name, plan.ok ? plan.displace : null).name;
-    }
-    const prepared = new PreparedEmoteUpload(emote, defaultName, result.image);
-    return { emote, previewImage: prepared.uploadImage, prepared, slotNotice };
+    const slot = existing ? undefined : await this.allocator.preview(synced, emote);
+    const defaultName = slot?.name ?? existing?.name ?? emote.name;
+    const prepared = new PreparedEmoteUpload(emote, defaultName, result.image, slot?.displace, slot?.suffixed);
+    return { emote, previewImage: prepared.uploadImage, prepared, slotNotice: slot?.notice };
   }
 
   public linkSourceSet(server: ServerId, link: string, observer?: SyncObserver): Promise<SyncResult> {
     return this.apply(server, new LinkSourceSetCommand(link, this.sevenTv), observer);
   }
 
-  public addEmote(server: ServerId, source: string | PreparedEmoteAdd, name?: string): Promise<SyncResult> {
-    return this.apply(server, new AddEmoteCommand(source, name, this.sevenTv, this.allocator));
+  /** Confirm the exact preview or return typed feedback with retry guidance. */
+  public async addEmote(server: ServerId, prepared: PreparedEmoteAdd, name?: string): Promise<EmoteAddConfirmation> {
+    const result = await this.apply(server, new AddEmoteCommand(prepared, name, this.allocator));
+    return {
+      ...result,
+      feedback: result.feedback.map((message) => {
+        const retry = SyncCore.emoteAddRetry(message.reason);
+        return retry ? { ...message, retry } : message;
+      }),
+    };
+  }
+
+  private static emoteAddRetry(reason: FeedbackMessage["reason"]): string | undefined {
+    switch (reason) {
+      case "emote-name-taken": return "and choose another name.";
+      case "emote-name-changed": return "to review the name.";
+      case "emote-promotion-unavailable": return "to start over.";
+      case "emote-slot-changed": return "to review the slot.";
+    }
   }
 
   public removeEmote(server: ServerId, name: string): Promise<SyncResult> {

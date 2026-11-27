@@ -1,3 +1,4 @@
+import { ProblemLedger } from "./problem-ledger.ts";
 import { ServerQuotas, type Quota } from "./quota.ts";
 import { ManagedEmote, ReservedSlot } from "./slot-occupant.ts";
 import type { ManagedTier } from "./tier.ts";
@@ -5,7 +6,6 @@ import type {
   DiscordEmoji,
   DiscordEmojiId,
   Problem,
-  ProblemKind,
   RequestedEmote,
   ServerStateSnapshot,
   SevenTvEmoteId,
@@ -16,13 +16,6 @@ import type {
 
 export type SlotPlan = { ok: true; displace: ManagedEmote | null } | { ok: false };
 
-/** Selects recorded problems; an omitted field matches anything. */
-export interface ProblemMatch {
-  kind: ProblemKind;
-  sevenTvEmoteId?: SevenTvEmoteId;
-  message?: string;
-}
-
 /** Everything the bot persists for one Server. */
 export class ServerState {
   private managed: ManagedEmote[];
@@ -31,10 +24,8 @@ export class ServerState {
   private linkedUser: SevenTvUserId | null;
   private trendingSettings: TrendingSettings;
   private logChannel: string | null;
-  private problemList: Problem[];
+  public readonly problemLedger: ProblemLedger;
   private readonly extra: Record<string, unknown>;
-  /** Problems found again during the current review (see beginProblemReview). */
-  private readonly confirmed = new Set<Problem>();
 
   private constructor(snapshot: ServerStateSnapshot) {
     this.managed = snapshot.managedEmotes.map((m) => ManagedEmote.fromSnapshot(m));
@@ -43,7 +34,7 @@ export class ServerState {
     this.linkedUser = snapshot.linkedUserId;
     this.trendingSettings = { ...snapshot.trending };
     this.logChannel = snapshot.logChannelId;
-    this.problemList = snapshot.problems.map((p) => ({ ...p }));
+    this.problemLedger = new ProblemLedger(snapshot.problems);
     this.extra = { ...snapshot.extra };
   }
 
@@ -72,7 +63,7 @@ export class ServerState {
       linkedUserId: this.linkedUser,
       trending: { ...this.trendingSettings },
       logChannelId: this.logChannel,
-      problems: this.problemList.map((p) => ({ ...p })),
+      problems: this.problemLedger.snapshot(),
     };
     if (Object.keys(this.extra).length > 0) snapshot.extra = structuredClone(this.extra);
     return snapshot;
@@ -91,7 +82,7 @@ export class ServerState {
   }
 
   public get problems(): ReadonlyArray<Problem> {
-    return this.problemList;
+    return this.problemLedger.snapshot();
   }
 
   public get linkedUserId(): SevenTvUserId | null {
@@ -137,7 +128,7 @@ export class ServerState {
     this.managed = this.managed.filter((m) => m.tier !== "source");
     if (keepAsReserved) this.reserved.push(...released.map((m) => new ReservedSlot(m.discordEmojiId, m.quota)));
     this.linkedUser = null;
-    this.clearPending();
+    this.problemLedger.closeSourceSet();
     return released;
   }
 
@@ -156,79 +147,6 @@ export class ServerState {
 
   public setLogChannel(channelId: string): void {
     this.logChannel = channelId;
-  }
-
-  /** Record a problem unless an identical one is already recorded; either way it counts as confirmed in this review. */
-  public recordProblem(problem: Problem): void {
-    const existing = this.problemList.find((p) => ServerState.matches(p, problem));
-    if (existing) {
-      this.confirmed.add(existing);
-    } else {
-      this.problemList.push(problem);
-      this.confirmed.add(problem);
-    }
-  }
-
-  /** Record a problem even if an identical one exists (used for the rebuilt pending list). */
-  public addProblem(problem: Problem): void {
-    this.problemList.push(problem);
-  }
-
-  /** Whether a problem of `kind` is recorded for the emote (or, with `message`, with that text). */
-  public hasProblem(match: ProblemMatch): boolean {
-    return this.problemList.some((p) => ServerState.matches(p, match));
-  }
-
-  /** Mark matching problems as still current in this review. */
-  public confirmProblem(match: ProblemMatch): void {
-    for (const p of this.problemList) if (ServerState.matches(p, match)) this.confirmed.add(p);
-  }
-
-  /** Forget matching problems. */
-  public clearProblem(match: ProblemMatch): void {
-    this.problemList = this.problemList.filter((p) => !ServerState.matches(p, match));
-  }
-
-  /** Start a review: problems must be confirmed again to survive {@link endProblemReview}. */
-  public beginProblemReview(): void {
-    this.confirmed.clear();
-  }
-
-  /**
-   * End a review and drop what is no longer current: skipped and too-large problems nothing
-   * confirmed again, and suffix notices for emotes that are not managed any more. Pending
-   * problems are rebuilt by the Source Set mirror itself.
-   */
-  public endProblemReview(): void {
-    this.problemList = this.problemList.filter((p) => this.isCurrent(p));
-    this.confirmed.clear();
-  }
-
-  private isCurrent(problem: Problem): boolean {
-    switch (problem.kind) {
-      case "pending":
-        return true;
-      case "renamed-with-suffix":
-        return problem.sevenTvEmoteId !== undefined && this.findManaged(problem.sevenTvEmoteId) !== undefined;
-      default:
-        return this.confirmed.has(problem);
-    }
-  }
-
-  private static matches(problem: Problem, match: ProblemMatch): boolean {
-    return (
-      problem.kind === match.kind &&
-      (match.sevenTvEmoteId === undefined || problem.sevenTvEmoteId === match.sevenTvEmoteId) &&
-      (match.message === undefined || problem.message === match.message)
-    );
-  }
-
-  public pendingEmoteIds(): Set<SevenTvEmoteId | undefined> {
-    return new Set(this.problemList.filter((p) => p.kind === "pending").map((p) => p.sevenTvEmoteId));
-  }
-
-  public clearPending(): void {
-    this.problemList = this.problemList.filter((p) => p.kind !== "pending");
   }
 
   /**
@@ -266,6 +184,8 @@ export class ServerState {
    */
   public planSlot(quota: Quota, tier: ManagedTier, used: number, limit: number): SlotPlan {
     if (used < limit) return { ok: true, displace: null };
+    // One Displacement cannot free a Slot while the Server is already over quota.
+    if (used > limit) return { ok: false };
     const victim = this.managed
       .map((m, index) => ({ m, index }))
       .filter(({ m }) => m.quota === quota && m.canBeDisplacedBy(tier))

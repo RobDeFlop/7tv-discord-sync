@@ -1,16 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
-  AddEmoteCommand,
-  ConfigureLogChannelCommand,
-  LinkSourceSetCommand,
-  RemoveEmoteCommand,
   SyncCore,
   UnlinkSourceSetCommand,
 } from "./index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
+import { addRequestedEmote } from "../testing/requested-emotes.ts";
 
 const S = "server-1";
-const emoteLink = (id: string) => `https://7tv.app/emotes/${id}`;
 const userLink = (id: string) => `https://7tv.app/users/${id}`;
 
 function setup(opts: { boostLevel?: number } = {}) {
@@ -102,7 +98,7 @@ describe("reconcile mirrors the Source Set", () => {
     emotes(["a", "b"]);
     sevenTv.setEmotes("setA", "Main", ["a", "b"]);
     await core.linkSourceSet(S, userLink("u1"));
-    await core.addEmote(S, emoteLink("a"));
+    await addRequestedEmote(core, S, "a");
     sevenTv.setEmotes("setA", "Main", []);
     await core.reconcile(S);
     expect(names()).toEqual(["AA"]);
@@ -170,6 +166,24 @@ describe("emotes that do not fit", () => {
     expect(r.feedback).toEqual([]);
   });
 
+  test("an interrupted scan does not suppress the first warning for a pending emote", async () => {
+    const { core, discord, sevenTv, emotes } = await fullWithOneFree();
+    await core.linkSourceSet(S, userLink("u1"));
+    emotes(["d"]);
+    emotes(["x"], true);
+    sevenTv.setEmotes("setA", "Main", ["a", "b", "d", "x"]);
+    const failure = new Error("upload failed");
+    discord.failCreatesAfter(S, 0, failure);
+    await expect(core.reconcile(S)).rejects.toBe(failure);
+    expect((await core.status(S)).problems.map((problem) => problem.sevenTvEmoteId)).toEqual(["b", "c"]);
+
+    discord.allowCreates(S);
+    expect((await core.reconcile(S)).feedback).toEqual([
+      { level: "warning", text: "No free slot for DD; they will be added when slots free up." },
+    ]);
+    expect((await core.status(S)).problems.map((problem) => problem.sevenTvEmoteId)).toEqual(["b", "d"]);
+  });
+
   test("a too-large Source Set emote is skipped with feedback", async () => {
     const { sevenTv, core, names, emotes } = setup();
     emotes(["a", "b"]);
@@ -183,31 +197,13 @@ describe("emotes that do not fit", () => {
 });
 
 describe("add displaces Source Set emotes", () => {
-  test("a failed replacement reports the displaced emote and restores it on the next sync", async () => {
-    const { sevenTv, discord, core, names, emotes } = setup();
-    for (let i = 0; i < 49; i++) discord.seedEmoji(S, { name: `hand${i}`, animated: false });
-    emotes(["a", "r"]);
-    sevenTv.setEmotes("setA", "Main", ["a"]);
-    await core.linkSourceSet(S, userLink("u1"));
-    discord.failCreatesAfter(S, 0, new Error("upload failed"));
-
-    const result = await core.addEmote(S, emoteLink("r"));
-    expect(errors(result)[0]?.text).toMatch(/AA.*next sync/);
-    expect(names()).not.toContain("RR");
-    expect((await core.status(S)).quotas.static.free).toBe(1);
-    discord.allowCreates(S);
-    await core.reconcile(S);
-    expect(names()).toContain("AA");
-    expect((await core.status(S)).quotas.static.byTier).toMatchObject({ requested: 0, source: 1, reserved: 49 });
-  });
-
   test("a Requested Emote displaces a Source Set emote with feedback; it returns as pending, not re-added", async () => {
     const { sevenTv, discord, core, names, emotes } = setup();
     for (let i = 0; i < 49; i++) discord.seedEmoji(S, { name: `hand${i}`, animated: false });
     emotes(["a", "r"]);
     sevenTv.setEmotes("setA", "Main", ["a"]);
     await core.linkSourceSet(S, userLink("u1"));
-    const r = await core.addEmote(S, emoteLink("r"));
+    const r = await addRequestedEmote(core, S, "r");
     expect(names()).toContain("RR");
     expect(names()).not.toContain("AA");
     expect(r.feedback.some((f) => f.level === "warning")).toBe(true);
@@ -224,7 +220,7 @@ describe("unlink", () => {
     ctx.emotes(["a", "b"]);
     ctx.sevenTv.setEmotes("setA", "Main", ["a", "b"]);
     await ctx.core.linkSourceSet(S, userLink("u1"));
-    await ctx.core.addEmote(S, emoteLink("a"));
+    await addRequestedEmote(ctx.core, S, "a");
     return ctx;
   }
 

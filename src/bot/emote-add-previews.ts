@@ -18,7 +18,7 @@ export class EmoteAddPreviews {
   private static readonly PREVIEW_TTL_MS = 5 * 60_000;
   private readonly pending = new Map<string, PendingEmoteAdd>();
 
-  public constructor(private readonly core: SyncCore) {}
+  public constructor(private readonly core: Pick<SyncCore, "addEmote">) {}
 
   public open(serverId: ServerId, userId: string, commandPath: string, preparation: EmoteAddPreparation): SlashReply {
     if ("feedback" in preparation) return FeedbackRouter.format([preparation.feedback]);
@@ -65,12 +65,9 @@ export class EmoteAddPreviews {
     let reply: string;
     try {
       const { feedback } = await this.core.addEmote(pending.serverId, pending.prepared, name);
-      reply = FeedbackRouter.format(feedback.map((message) => {
-        const nextStep = message.reason === "emote-name-taken" ? "and choose another name."
-          : message.reason === "emote-name-changed" ? "to review the name."
-          : message.reason === "emote-promotion-unavailable" ? "to start over." : null;
-        return nextStep ? { ...message, text: `${message.text} Run \`/${pending.commandPath}\` again ${nextStep}` } : message;
-      }));
+      reply = FeedbackRouter.format(feedback.map((message) => message.retry
+        ? { ...message, text: `${message.text} Run \`/${pending.commandPath}\` again ${message.retry}` }
+        : message));
     } catch (error) {
       const server = Logger.field(pending.serverId);
       const command = Logger.field(pending.commandPath);

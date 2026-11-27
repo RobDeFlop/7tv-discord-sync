@@ -17,7 +17,13 @@ abstract class PreparedEmote {
 export class PreparedEmoteUpload extends PreparedEmote {
   private readonly imageSnapshot: EmojiImage;
 
-  public constructor(emote: SevenTvEmote, defaultName: string, image: EmojiImage) {
+  public constructor(
+    emote: SevenTvEmote,
+    defaultName: string,
+    image: EmojiImage,
+    public readonly approvedDisplacement: DiscordEmojiId | null = null,
+    public readonly defaultNameWasSuffixed = false,
+  ) {
     super(emote, defaultName);
     this.imageSnapshot = { animated: image.animated, bytes: new Uint8Array(image.bytes) };
   }

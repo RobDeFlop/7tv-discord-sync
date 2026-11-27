@@ -83,6 +83,17 @@ export class EmoteAddPromotionUnavailableError extends DomainError {
   }
 }
 
+/** The current Slot would require displacing a different Managed Emote than the admin saw. */
+export class EmoteAddSlotChangedError extends DomainError {
+  public constructor() {
+    super("Which Managed Emote would be displaced has changed. No emote was added.");
+  }
+
+  public toFeedback(): FeedbackMessage {
+    return { level: "error", text: this.message, reason: "emote-slot-changed" };
+  }
+}
+
 /** No free slot in a quota and nothing of lower Precedence to displace. */
 export class QuotaFullError extends DomainError {
   public constructor(

@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { SetTrendingCommand, SyncCore } from "./index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
+import { addRequestedEmote } from "../testing/requested-emotes.ts";
 
 const S = "server-1";
-const emoteLink = (id: string) => `https://7tv.app/emotes/${id}`;
 
 function setup() {
   const discord = new FakeDiscord();
@@ -90,7 +90,7 @@ describe("Trending Fill", () => {
     let st = await core.status(S);
     expect(st.quotas.static.byTier).toMatchObject({ source: 1, trending: 1 });
 
-    await core.addEmote(S, emoteLink("r1"));
+    await addRequestedEmote(core, S, "r1");
     st = await core.status(S);
     expect(st.quotas.static.byTier).toMatchObject({ requested: 1, source: 1, trending: 0 });
 
@@ -123,12 +123,4 @@ describe("Trending Fill", () => {
     expect((await core.status(S)).trending.enabled).toBe(false);
   });
 
-  test("skips trending emotes whose image cannot be used", async () => {
-    const { sevenTv, core, emotes, names } = setup();
-    emotes(["a", "b"]);
-    sevenTv.setImageSize("a", 10 * 1024 * 1024);
-    sevenTv.setTrending("week", ["a", "b"]);
-    await core.apply(S, new SetTrendingCommand(true));
-    expect(names()).toEqual(["BB"]);
-  });
 });

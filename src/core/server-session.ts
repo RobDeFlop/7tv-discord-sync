@@ -1,5 +1,5 @@
-import { DisplacementError, DomainError, MissingPermissionError, type ServerId } from "../domain/index.ts";
-import { RateLimitError, type DiscordPort, type StorePort } from "../ports/index.ts";
+import { DomainError, MissingPermissionError, type ServerId } from "../domain/index.ts";
+import type { DiscordPort, StorePort } from "../ports/index.ts";
 import { SyncedServer } from "./synced-server.ts";
 import type { SyncReport } from "./sync-report.ts";
 
@@ -24,7 +24,6 @@ export class ServerSession {
       synced = await this.load(server);
       await execute(synced);
     } catch (error) {
-      if (error instanceof DisplacementError && error.cause instanceof RateLimitError) throw error.cause;
       if (!(error instanceof DomainError)) throw error;
       const feedback = error.toFeedback();
       report.say(feedback.level, feedback.text, feedback.reason);

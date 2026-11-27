@@ -7,8 +7,7 @@ export class Reconciler {
   public constructor(private readonly steps: readonly ReconcileStep[]) {}
 
   public async reconcile(synced: SyncedServer, report: SyncReport): Promise<void> {
-    synced.state.beginProblemReview();
     for (const step of this.steps) await step.run(synced, report);
-    synced.state.endProblemReview(); // Only a full run knows which problems are gone.
+    synced.state.problemLedger.closeReconcile(synced.state.managedEmotes);
   }
 }
