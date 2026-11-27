@@ -18,10 +18,10 @@ test("a failed Discord request logs the operation and numeric diagnostics, not t
     const router = new FeedbackRouter(store, channel);
     const result = { changes: [], feedback: [{ level: "error" as const, text: "Failed" }] };
     await router.deliver("123", result);
-    expect(logged.mock.calls[0]).toEqual(["Could not deliver feedback for 123: status=404 code=10062"]);
+    expect(logged.mock.calls[0]).toEqual([expect.stringMatching(/^\[[^\]]+\]\[error\]: Could not deliver feedback for 123: status=404 code=10062$/)]);
     spyOn(channel, "send").mockRejectedValue({ code: "private-token", status: "private-token" });
     await router.deliver("123", result);
-    expect(logged.mock.calls[1]).toEqual(["Could not deliver feedback for 123:"]);
+    expect(logged.mock.calls[1]).toEqual([expect.stringMatching(/^\[[^\]]+\]\[error\]: Could not deliver feedback for 123:$/)]);
   } finally {
     logged.mockRestore();
   }

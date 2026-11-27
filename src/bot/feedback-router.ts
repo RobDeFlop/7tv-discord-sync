@@ -1,7 +1,7 @@
 import type { APIEmbed } from "discord.js";
 import type { FeedbackMessage, ServerId, SyncResult } from "../domain/index.ts";
 import type { StorePort } from "../ports/index.ts";
-import { Logger, logger } from "./logger.ts";
+import { Logger } from "./logger.ts";
 
 /** Where background sync feedback is posted. */
 export abstract class LogChannel {
@@ -37,7 +37,7 @@ export class FeedbackRouter {
       if (!channelId) return;
       await this.logChannel.send(channelId, FeedbackRouter.embeds(result.feedback));
     } catch (err) {
-      logger.error(`Could not deliver feedback for ${server}:`, Logger.diagnostics(err));
+      Logger.error(`Could not deliver feedback for ${server}:`, err);
     }
   }
 

@@ -1,39 +1,42 @@
-import { expect, mock, test } from "bun:test";
+import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import { Logger } from "./logger.ts";
 
-test("Logger writes informational messages without changing them", () => {
-  const log = mock((..._args: unknown[]) => {});
-  const error = mock((..._args: unknown[]) => {});
-  const logger = new Logger({ log, error });
-
-  logger.info("Ready as bot, caught up 2 Servers.");
-
-  expect(log.mock.calls).toEqual([["Ready as bot, caught up 2 Servers."]]);
-  expect(error).not.toHaveBeenCalled();
+const initialLevel = process.env.LOG_LEVEL;
+afterEach(() => {
+  mock.restore();
+  if (initialLevel === undefined) delete process.env.LOG_LEVEL;
+  else process.env.LOG_LEVEL = initialLevel;
 });
 
-test("Logger writes a single failure message with only safe numeric diagnostics", () => {
-  const log = mock((..._args: unknown[]) => {});
-  const error = mock((..._args: unknown[]) => {});
-  const logger = new Logger({ log, error });
-  const failure = Object.assign(new Error("token in message", { cause: new Error("token in cause") }), {
-    status: 404, code: 10062, url: "/interactions/123/private-token", requestBody: { token: "private-token" },
+test("the minimum level filters output before it reaches the console", () => {
+  const debug = spyOn(console, "debug").mockImplementation(() => {});
+  const info = spyOn(console, "info").mockImplementation(() => {});
+  const warn = spyOn(console, "warn").mockImplementation(() => {});
+  process.env.LOG_LEVEL = "warn";
+  Logger.debug("hidden");
+  Logger.info("hidden");
+  Logger.warn("retrying");
+  expect(debug).not.toHaveBeenCalled();
+  expect(info).not.toHaveBeenCalled();
+  expect(warn.mock.calls).toEqual([[expect.stringMatching(/^\[\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z\]\[warn\]: retrying$/)]]);
+  delete process.env.LOG_LEVEL;
+  Logger.debug("still hidden");
+  Logger.info("ready");
+  expect(debug).not.toHaveBeenCalled();
+  expect(info).toHaveBeenCalledTimes(1);
+});
+
+test("external objects and thrown values never expose raw request data", () => {
+  const error = spyOn(console, "error").mockImplementation(() => {});
+  const failure = Object.assign(new Error("private-token"), {
+    status: 404, code: 10062, requestBody: { token: "private-token" },
   });
-
-  logger.error("Startup failed:", Logger.diagnostics(failure));
-  logger.error("Startup failed:", Logger.diagnostics({ status: 403, code: "private-token" }));
-  logger.error("Startup failed:", Logger.diagnostics({ status: Infinity, code: 10062 }));
-  logger.error("Startup failed:", Logger.diagnostics({ status: "private-token", code: Number.MAX_SAFE_INTEGER + 1 }));
-  logger.error("Startup failed:", Logger.diagnostics("private-token"));
-  logger.error("Startup failed:", Logger.diagnostics(null));
-
+  Logger.error(failure);
+  Logger.error("Startup failed:", failure, "private-token");
+  Logger.error("Startup failed:", { status: Infinity, code: "private-token" }, null);
   expect(error.mock.calls).toEqual([
-    ["Startup failed: status=404 code=10062"],
-    ["Startup failed: status=403"],
-    ["Startup failed: code=10062"],
-    ["Startup failed:"],
-    ["Startup failed:"],
-    ["Startup failed:"],
+    [expect.stringMatching(/^\[[\dT:Z.\-]+\]\[error\]: status=404 code=10062$/)],
+    [expect.stringMatching(/^\[[\dT:Z.\-]+\]\[error\]: Startup failed: status=404 code=10062$/)],
+    [expect.stringMatching(/^\[[\dT:Z.\-]+\]\[error\]: Startup failed:$/)],
   ]);
-  expect(log).not.toHaveBeenCalled();
 });

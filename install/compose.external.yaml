@@ -3,4 +3,5 @@ services:
     image: ghcr.io/robdeflop/7tv-discord-sync:${BOT_VERSION:?Set BOT_VERSION to the release version without v}
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN:?Set DISCORD_TOKEN}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL for your external PostgreSQL database}

@@ -61,6 +61,7 @@ if [ -e .env ]; then chmod 600 .env; else install -m 600 .example.env .env; fi
 | --- | --- |
 | `DISCORD_TOKEN` | The bot token from step 2 |
 | `DATABASE_URL` | Your Postgres connection string, e.g. `postgres://user:password@localhost:5432/7tv_sync` |
+| `LOG_LEVEL` | Optional minimum console level: `debug`, `info` (default), `warn`, or `error` |
 
 Bun loads `.env` automatically. On Windows, restrict the file using account permissions. Keep `.env` private; do not share or commit it.
 
