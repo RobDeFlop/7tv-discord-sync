@@ -47,16 +47,25 @@ export class SevenTvMapper {
     if (value.animated != null && typeof value.animated !== "boolean") return false;
     const { host } = value;
     // The source URL is fetched, so only accept the public 7TV emote CDN path and simple filenames.
-    return host == null || (this.isRecord(host) && typeof host.url === "string" &&
-      /^\/\/cdn\.7tv\.app\/emote\/[a-zA-Z0-9_-]+$/.test(host.url) &&
-      (host.files == null || (Array.isArray(host.files) && host.files.every((file: unknown) => this.isFile(file)))));
+    if (host == null) return true;
+    if (!this.isRecord(host) || typeof host.url !== "string") return false;
+    const { files } = host;
+    if (files != null && (!Array.isArray(files) || !files.every((file: unknown) => this.isFile(file)))) return false;
+    // 7TV emits an empty URL when an emote has no image outputs.
+    if (host.url === "" && (files == null || files.length === 0)) return true;
+    return /^\/\/cdn\.7tv\.app\/emote\/[a-zA-Z0-9_-]+$/.test(host.url);
   }
 
   public static isSet(value: unknown): value is ApiSet {
-    return this.isRecord(value) && this.isId(value.id) && typeof value.name === "string" &&
-      (value.emotes == null || (Array.isArray(value.emotes) && value.emotes.every((entry: unknown) =>
+    if (!this.isRecord(value) || !this.isId(value.id) || typeof value.name !== "string") return false;
+    const count = value.emote_count;
+    if (count !== undefined && !this.isNonNegativeInteger(count)) return false;
+    // v3 omits emotes for a genuinely empty set. Don't mirror a truncated, non-empty set as empty.
+    if (value.emotes == null) return count === undefined || count === 0;
+    return Array.isArray(value.emotes) && (count === undefined || count === value.emotes.length) &&
+      value.emotes.every((entry: unknown) =>
         this.isRecord(entry) && this.isId(entry.id) && typeof entry.name === "string" &&
-        (entry.data == null || this.isEmote(entry.data)))));
+        (entry.data == null || this.isEmote(entry.data)));
   }
 
   public static isUser(value: unknown): value is ApiUser {

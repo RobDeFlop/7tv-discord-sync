@@ -66,6 +66,14 @@ describe("lookups", () => {
     expect(await adapter.getSet(fx.SET_ID)).toBeNull();
   });
 
+  test("getSet accepts an omitted empty list but rejects an incomplete non-empty set", async () => {
+    const path = `${API}/emote-sets/${fx.SET_ID}`;
+    const empty = { id: fx.SET_ID, name: "Empty" };
+    await expect(setup({ [path]: empty }).adapter.getSet(fx.SET_ID)).resolves.toEqual({ ...empty, emotes: [] });
+    await expect(setup({ [path]: { ...empty, emote_count: 1 } }).adapter.getSet(fx.SET_ID))
+      .rejects.toBeInstanceOf(SevenTvRequestError);
+  });
+
   test("getSet mirrors aliases and skips emotes without data", async () => {
     const { adapter } = setup({ [`${API}/emote-sets/${fx.SET_ID}`]: fx.emoteSet });
     expect(await adapter.getSet(fx.SET_ID)).toEqual({
