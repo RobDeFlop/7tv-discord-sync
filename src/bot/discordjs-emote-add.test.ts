@@ -27,13 +27,14 @@ test("the deferred private slash reply renders the image, names, and confirmatio
   };
   const request = new DiscordJsSlashRequest(interaction as unknown as ChatInputCommandInteraction);
   await request.defer();
-  await request.reply(preview);
+  const slotNotice = "Adding this emote could remove a lower-precedence Managed Emote.";
+  await request.reply({ ...preview, slotNotice });
   expect(interaction.deferReply).toHaveBeenCalledWith({ flags: MessageFlags.Ephemeral });
   const [reply] = interaction.editReply.mock.calls[0]!;
   expect(reply.files).toEqual([{ name: "preview.gif", attachment: Buffer.from(preview.image.bytes) }]);
   const embed = reply.embeds?.[0];
   if (!(embed instanceof EmbedBuilder)) throw new Error("Expected an emote preview embed");
-  expect(embed.toJSON()).toMatchObject({ image: { url: "attachment://preview.gif" }, fields: [
+  expect(embed.toJSON()).toMatchObject({ description: slotNotice, image: { url: "attachment://preview.gif" }, fields: [
     { name: "Original 7TV name", value: "Pog Champ" },
     { name: "Add as", value: "Pog\\_Champ" },
   ] });
