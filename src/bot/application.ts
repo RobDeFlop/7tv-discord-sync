@@ -15,6 +15,7 @@ export class Application {
   private readonly store: PostgresStore;
   private readonly bot: DiscordBot;
   private readonly core: SyncCore;
+  private readonly events: GatewayEvents;
   private readonly unsubscribe: () => void;
 
   public constructor(private readonly config: Config) {
@@ -26,9 +27,9 @@ export class Application {
     });
     const logChannel = DiscordBot.logChannel(client);
     const feedback = new FeedbackRouter(this.core, logChannel);
-    const events = new GatewayEvents(this.core, feedback, DiscordBot.servers(client));
-    this.unsubscribe = events.listenToSevenTv(sevenTv);
-    this.bot = new DiscordBot(client, events, new SlashCommandRegistry(this.core, feedback, logChannel));
+    this.events = new GatewayEvents(this.core, feedback, DiscordBot.servers(client));
+    this.unsubscribe = this.events.listenToSevenTv(sevenTv);
+    this.bot = new DiscordBot(client, this.events, new SlashCommandRegistry(this.core, feedback, logChannel));
   }
 
   public async start(): Promise<void> {
@@ -48,6 +49,7 @@ export class Application {
     this.unsubscribe();
     await this.bot.stop();
     await this.core.stop();
+    await this.events.idle();
     await this.store.close();
     process.exit(0);
   }

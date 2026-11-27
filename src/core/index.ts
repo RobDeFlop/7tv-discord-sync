@@ -10,7 +10,7 @@ import {
   type TierUsage,
   type Quota,
 } from "../domain/index.ts";
-import type { DiscordPort, SevenTvChange, SevenTvPort, StorePort } from "../ports/index.ts";
+import { RateLimitError, type DiscordPort, type SevenTvChange, type SevenTvPort, type StorePort } from "../ports/index.ts";
 import { AddEmoteCommand } from "./commands/add-emote-command.ts";
 import { RemoveEmoteCommand } from "./commands/remove-emote-command.ts";
 import { LinkSourceSetCommand } from "./commands/link-source-set-command.ts";
@@ -44,7 +44,8 @@ export class SyncCore {
   private readonly session: ServerSession;
   private readonly allocator = new SlotAllocator();
   private readonly scheduler: SyncScheduler;
-  private readonly settingTasks = new Set<Promise<unknown>>();
+  private readonly commandTasks = new Set<Promise<unknown>>();
+  private stopping = false;
 
   public constructor(
     private readonly sevenTv: SevenTvPort,
@@ -126,13 +127,24 @@ export class SyncCore {
 
   /** Apply and persist a Command; settings join a scheduled sync only after their save succeeds. */
   public async apply(server: ServerId, command: Command, observer?: SyncObserver): Promise<SyncResult> {
+    if (this.stopping) {
+      const result = SyncReport.single("warning", "Command cancelled because the bot is stopping.");
+      if (observer) await observer(server, { kind: "cancelled", result });
+      return result;
+    }
     const committed = this.lock.run(server, async () => {
       const report = new SyncReport();
       let applied = false;
-      await this.session.run(server, report, async (synced) => {
-        await command.execute(synced, report);
-        applied = true;
-      });
+      try {
+        await this.session.run(server, report, async (synced) => {
+          await command.execute(synced, report);
+          applied = true;
+        });
+      } catch (error) {
+        if (!(error instanceof RateLimitError)) throw error;
+        const pause = this.scheduler.recover(server, error, report.toResult());
+        report.say("warning", `Discord stopped this command before it finished. ${pause} Retry the command after sync resumes.`);
+      }
       const result = report.toResult();
       const completion = applied && command.requestsSync
         ? this.scheduler.request(server, observer && ((target, update) => observer(target, update, result.feedback)))
@@ -142,11 +154,9 @@ export class SyncCore {
       if (!completion && observer) await observer(server, { kind: "finished", result });
       return { result, completion };
     });
-    if (command.requestsSync) {
-      this.settingTasks.add(committed);
-      const remove = () => this.settingTasks.delete(committed);
-      void committed.then(remove, remove);
-    }
+    this.commandTasks.add(committed);
+    const remove = () => this.commandTasks.delete(committed);
+    void committed.then(remove, remove);
     const { result, completion } = await committed;
     if (!completion || observer) return result;
 
@@ -185,12 +195,14 @@ export class SyncCore {
   }
 
   public async syncIdle(): Promise<void> {
-    while (this.settingTasks.size) await Promise.allSettled([...this.settingTasks]);
+    while (this.commandTasks.size) await Promise.allSettled([...this.commandTasks]);
     await this.scheduler.idle();
   }
 
-  public stop(): Promise<void> {
-    return this.scheduler.stop();
+  public async stop(): Promise<void> {
+    this.stopping = true;
+    await this.scheduler.stop();
+    await this.syncIdle();
   }
 
   /** Used/free slots per quota and tier, plus problems. */

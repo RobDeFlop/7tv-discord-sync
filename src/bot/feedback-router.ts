@@ -46,6 +46,12 @@ export class FeedbackRouter {
   public privateReply(request: SlashRequest): SyncObserver {
     let recipient: SlashRequest | undefined = request;
     const deadline = request.createdAt + FeedbackRouter.REPLY_WINDOW_MS;
+    const timer = setTimeout(() => { recipient = undefined; }, Math.max(0, deadline - Date.now()));
+    timer.unref();
+    const release = (): void => {
+      recipient = undefined;
+      clearTimeout(timer);
+    };
     return async (server, update, setting) => {
       if (recipient && Date.now() < deadline) {
         try {
@@ -55,10 +61,10 @@ export class FeedbackRouter {
         } catch (error) {
           Logger.write(LogLevel.error, `sync_reply_edit_failed operation=edit_original server=${Logger.field(server)} ${Logger.failure(error)}`);
         } finally {
-          if (update.kind !== "paused") recipient = undefined;
+          if (update.kind !== "paused") release();
         }
       }
-      recipient = undefined;
+      release();
       await this.deliverUpdate(server, update, true);
     };
   }

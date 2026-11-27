@@ -70,13 +70,17 @@ export class SyncScheduler {
   }
 
   /** Recover the Server after a Command is interrupted, without replaying the Command. */
-  public recover(server: ServerId, error: RateLimitError, observer?: SyncObserver): string {
+  public recover(server: ServerId, error: RateLimitError, partial: SyncResult): string {
     if (this.stopped) return "Sync was not queued because the bot is stopping.";
     const lane = this.lane(server);
-    const batch = (lane.retry ??= new SyncBatch());
-    const previousPause = batch.pause;
-    if (!previousPause) this.pause(server, lane, batch, error);
-    this.observe(server, batch, observer);
+    const batch = lane.retry ?? lane.pending ?? new SyncBatch();
+    if (lane.pending === batch) lane.pending = undefined;
+    batch.report.merge(partial);
+    // Reset an existing pause if a later write reported a longer wait.
+    if (!batch.pause || Date.now() + error.retryAfterMs > batch.pause.retryAt) {
+      clearTimeout(batch.timer);
+      this.pause(server, lane, batch, error);
+    }
     return batch.pause?.result.feedback.at(-1)?.text ?? "Sync is already queued to resume.";
   }
 
@@ -134,7 +138,7 @@ export class SyncScheduler {
     this.track(this.lock.run(server, () => this.withPermit(async () => {
       if (this.lanes.get(server) !== lane) return;
       // A Command may have requested a priority retry before this attempt acquired the lock.
-      if (lane.retry && lane.retry !== batch) {
+      if (batch.timer || (lane.retry && lane.retry !== batch)) {
         batch.scheduled = false;
         return;
       }
