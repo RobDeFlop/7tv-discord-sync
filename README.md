@@ -7,7 +7,11 @@ A Discord bot that keeps a server's emojis in sync with emotes from [7TV](https:
 - Optionally fill leftover slots with trending emotes.
 - Emojis you uploaded yourself are never touched.
 
-## Requirements
+## Install with Docker Compose
+
+Start at the public [container package page](https://github.com/users/RobDeFlop/packages/container/package/7tv-discord-sync). Its description explains how to copy the [operator install guide](install/README.md), Compose files and example environment from the release image without a clone or login. Choose bundled PostgreSQL (default) or your existing database. For a source install instead, follow the steps below.
+
+## Source install requirements
 
 - [Bun](https://bun.sh) 1.4 or newer
 - A Postgres database (local or hosted, e.g. Neon or Supabase)
@@ -47,18 +51,19 @@ Any Postgres database works. Create an empty database, for example `7tv_sync`, a
 
 ### 5. Configure
 
-Copy the example file and fill in your values:
+In a directory you control, create `.env` readable and writable only by your account before adding credentials (Linux/macOS). If it already exists, keep its contents:
 
 ```sh
-cp .example.env .env
+if [ -e .env ]; then chmod 600 .env; else install -m 600 .example.env .env; fi
 ```
 
 | Variable | Value |
 | --- | --- |
 | `DISCORD_TOKEN` | The bot token from step 2 |
 | `DATABASE_URL` | Your Postgres connection string, e.g. `postgres://user:password@localhost:5432/7tv_sync` |
+| `LOG_LEVEL` | Optional minimum console level: `debug`, `info` (default), `warn`, or `error` |
 
-Bun loads `.env` automatically. `.env` is gitignored, so your token is never committed.
+Bun loads `.env` automatically. On Windows, restrict the file using account permissions. Keep `.env` private; do not share or commit it.
 
 ### 6. Run
 
@@ -114,10 +119,14 @@ The bot also syncs on its own when it joins a server, when emojis change, when t
 
 ## Development
 
+Maintainers: see [Publishing the GHCR image](docs/publishing.md) for the release tag policy, one-time package setup, and anonymous pull check.
+
 ```sh
 bun test            # run the tests
 bun run typecheck   # type-check
 bun run db:generate # regenerate migrations after a schema change (needs DATABASE_URL)
 ```
+
+With Docker Compose available, `bash scripts/test-compose.sh` checks both operator install paths using a local image and disposable databases. It does not require a Discord token or a published image.
 
 Coding standards are in `docs/agents/coding-standards.md`. In conditions, use booleans directly or negate them with `!` rather than comparing them to `true` or `false`. Check for `null` explicitly when it represents a distinct unknown state.

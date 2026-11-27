@@ -1,6 +1,7 @@
 import type { APIEmbed } from "discord.js";
 import type { FeedbackMessage, ServerId, SyncResult } from "../domain/index.ts";
 import type { StorePort } from "../ports/index.ts";
+import { Logger, LogLevel } from "./logger.ts";
 
 /** Where background sync feedback is posted. */
 export abstract class LogChannel {
@@ -36,7 +37,15 @@ export class FeedbackRouter {
       if (!channelId) return;
       await this.logChannel.send(channelId, FeedbackRouter.embeds(result.feedback));
     } catch (err) {
-      console.error(`Could not deliver feedback for ${server}:`, err);
+      // Discord errors can contain interaction tokens. Only include numeric diagnostics.
+      const details = [`Could not deliver feedback for ${server}:`];
+      if (err !== null && typeof err === "object") {
+        for (const key of ["status", "code"]) {
+          const value = Object.getOwnPropertyDescriptor(err, key)?.value;
+          if (Number.isSafeInteger(value)) details.push(`${key}=${value}`);
+        }
+      }
+      Logger.write(LogLevel.error, details.join(" "));
     }
   }
 

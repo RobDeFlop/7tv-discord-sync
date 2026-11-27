@@ -1,7 +1,31 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { FakeLogChannel } from "../testing/bot-fakes.ts";
 import { FakeStore } from "../testing/fakes.ts";
 import { FeedbackRouter } from "./feedback-router.ts";
+
+test("a failed Discord request logs the operation and numeric diagnostics, not the request", async () => {
+  const store = new FakeStore();
+  const state = await store.load("123");
+  state.setLogChannel("log");
+  await store.save("123", state);
+  const channel = new FakeLogChannel();
+  const error = Object.assign(new Error("secret in message"), {
+    status: 404, code: 10062, url: "/interactions/123/private-token", requestBody: { token: "private-token" },
+  });
+  spyOn(channel, "send").mockRejectedValue(error);
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const router = new FeedbackRouter(store, channel);
+    const result = { changes: [], feedback: [{ level: "error" as const, text: "Failed" }] };
+    await router.deliver("123", result);
+    expect(logged.mock.calls[0]).toEqual([expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z ERROR Could not deliver feedback for 123: status=404 code=10062$/)]);
+    spyOn(channel, "send").mockRejectedValue({ code: "private-token", status: "private-token" });
+    await router.deliver("123", result);
+    expect(logged.mock.calls[1]).toEqual([expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z ERROR Could not deliver feedback for 123:$/)]);
+  } finally {
+    logged.mockRestore();
+  }
+});
 
 test("FeedbackRouter keeps all severities visible within the combined embed text limit", async () => {
   const store = new FakeStore();
