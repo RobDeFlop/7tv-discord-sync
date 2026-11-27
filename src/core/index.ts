@@ -12,11 +12,19 @@ import {
   type Quota,
 } from "../domain/index.ts";
 import type { DiscordPort, SevenTvPort, StorePort } from "../ports/index.ts";
+import { AddEmoteCommand } from "./commands/add-emote-command.ts";
+import { RemoveEmoteCommand } from "./commands/remove-emote-command.ts";
 import { LinkSourceSetCommand } from "./commands/link-source-set-command.ts";
 import type { Command } from "./commands/command.ts";
 import { PreparedEmotePromotion, PreparedEmoteUpload, type PreparedEmoteAdd } from "./commands/prepared-emote-add.ts";
 import { ImageFailure } from "./image-failure.ts";
-import { SyncContext } from "./sync-context.ts";
+import { QuotaShrink } from "./quota-shrink.ts";
+import { Reconciler } from "./reconciler.ts";
+import { ServerLock } from "./server-lock.ts";
+import { ServerSession } from "./server-session.ts";
+import { SlotAllocator } from "./slot-allocator.ts";
+import { SourceSetMirror } from "./source-set-mirror.ts";
+import { TrendingFill } from "./trending-fill.ts";
 import type { SyncedServer } from "./synced-server.ts";
 
 export * from "./commands/index.ts";
@@ -30,26 +38,31 @@ export type EmoteAddPreparation =
 
 /** The sync core's public interface. */
 export class SyncCore {
-  private readonly context: SyncContext;
+  private readonly session: ServerSession;
+  private readonly allocator = new SlotAllocator();
+  private readonly reconciler: Reconciler;
 
-  public constructor(sevenTv: SevenTvPort, discord: DiscordPort, store: StorePort) {
-    this.context = new SyncContext(sevenTv, discord, store);
+  public constructor(private readonly sevenTv: SevenTvPort, private readonly discord: DiscordPort, store: StorePort) {
+    this.session = new ServerSession(discord, store, new ServerLock());
+    this.reconciler = new Reconciler([
+      new QuotaShrink(), new SourceSetMirror(sevenTv, this.allocator), new TrendingFill(sevenTv, this.allocator),
+    ]);
   }
 
   /** Validate a link before accepting a background sync; this does not mutate Server state. */
   public async prepareSourceLink(link: string): Promise<LinkSourceSetCommand> {
-    return new LinkSourceSetCommand(await this.context.sevenTv.resolveUserLink(link));
+    return new LinkSourceSetCommand(await this.sevenTv.resolveUserLink(link));
   }
 
   /** Prepare an emote preview without saving state or changing any Discord emojis. */
   public async prepareEmoteAdd(server: ServerId, link: string): Promise<EmoteAddPreparation> {
-    return this.prepareResolvedEmote(server, await this.context.sevenTv.resolveEmoteLink(link));
+    return this.prepareResolvedEmote(server, await this.sevenTv.resolveEmoteLink(link));
   }
 
   public async prepareEmoteSearch(server: ServerId, name: string): Promise<EmoteAddPreparation> {
     let emote: SevenTvEmote | null;
     try {
-      emote = await this.context.sevenTv.findEmoteByExactName(name);
+      emote = await this.sevenTv.findEmoteByExactName(name);
     } catch {
       return { feedback: { level: "error", text: "Could not search 7TV. Try again in a moment." } };
     }
@@ -58,16 +71,16 @@ export class SyncCore {
   }
 
   private async prepareResolvedEmote(server: ServerId, emote: SevenTvEmote): Promise<EmoteAddPreparation> {
-    const synced = await this.context.load(server);
+    const synced = await this.session.load(server);
     const managed = synced.state.findManaged(emote.id);
     const existing = managed ? synced.emojiOf(managed) : undefined;
-    const result = await this.context.sevenTv.downloadImage(emote.id).catch((error: unknown) => {
+    const result = await this.sevenTv.downloadImage(emote.id).catch((error: unknown) => {
       if (!existing) throw error;
       return { ok: false, reason: "unavailable" } as const;
     });
     if (!result.ok) {
       if (existing) {
-        const previewImage = await this.context.discord.downloadEmojiImage(server, existing);
+        const previewImage = await this.discord.downloadEmojiImage(server, existing);
         if (previewImage) return {
           emote,
           previewImage,
@@ -84,38 +97,53 @@ export class SyncCore {
     let defaultName = existing?.name;
     if (defaultName === undefined) {
       const quota = ServerQuotas.quotaOf(emote.animated);
-      const plan = await this.context.allocator.plan(synced, quota, "requested");
+      const plan = await this.allocator.plan(synced, quota, "requested");
       if (!plan.ok) slotNotice = `The ${quota} quota is full. No Managed Emote is eligible for displacement.`;
       else if (plan.displace) slotNotice = `The ${quota} quota is full. Adding this emote could remove a lower-precedence Managed Emote.`;
-      defaultName = this.context.allocator.placementName(synced, emote.name, plan.ok ? plan.displace : null).name;
+      defaultName = this.allocator.placementName(synced, emote.name, plan.ok ? plan.displace : null).name;
     }
     const prepared = new PreparedEmoteUpload(emote, defaultName, result.image);
     return { emote, previewImage: prepared.uploadImage, prepared, slotNotice };
   }
 
-  /** Apply an admin command to a Server. Domain errors come back as feedback. */
-  public async apply(server: ServerId, command: Command): Promise<SyncResult> {
+  public async linkSourceSet(server: ServerId, link: string): Promise<SyncResult> {
     try {
-      return await command.execute(server, this.context);
-    } catch (err) {
-      if (err instanceof DomainError) return { changes: [], feedback: [err.toFeedback()] };
-      throw err;
+      return await this.apply(server, await this.prepareSourceLink(link));
+    } catch (error) {
+      if (error instanceof DomainError) return { changes: [], feedback: [error.toFeedback()] };
+      throw error;
     }
+  }
+
+  public addEmote(server: ServerId, source: string | PreparedEmoteAdd, name?: string): Promise<SyncResult> {
+    return this.apply(server, new AddEmoteCommand(source, name, this.sevenTv, this.allocator));
+  }
+
+  public removeEmote(server: ServerId, name: string): Promise<SyncResult> {
+    return this.apply(server, new RemoveEmoteCommand(name, this.sevenTv));
+  }
+
+  /** Apply an admin command to a Server. Domain errors come back as feedback. */
+  public apply(server: ServerId, command: Command): Promise<SyncResult> {
+    return this.session.run(server, async (synced, report) => {
+      await command.execute(synced, report);
+      if (command.requestsSync) await this.reconciler.reconcile(synced, report);
+    });
   }
 
   /** Bring a Server's emojis in line with 7TV and the stored state. */
   public reconcile(server: ServerId): Promise<SyncResult> {
-    return this.context.reconciler.reconcile(server);
+    return this.session.run(server, (synced, report) => this.reconciler.reconcile(synced, report));
   }
 
   /** Used/free slots per quota and tier, plus problems. */
   public async status(server: ServerId): Promise<ServerStatus> {
-    const synced = await this.context.load(server);
+    const synced = await this.session.load(server);
     const quotas = await synced.quotas();
     const { state } = synced;
     return {
-      manageExpressions: await this.context.discord.hasManageExpressions(server),
-      writeQueue: this.context.discord.queueProgress(server),
+      manageExpressions: await this.discord.hasManageExpressions(server),
+      writeQueue: this.discord.queueProgress(server),
       quotas: {
         static: this.usage(synced, "static", quotas),
         animated: this.usage(synced, "animated", quotas),

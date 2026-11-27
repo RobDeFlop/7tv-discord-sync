@@ -1,40 +1,14 @@
-import { DisplacementError, DomainError, MissingPermissionError, type ServerId, type SyncResult } from "../domain/index.ts";
-import { RateLimitError } from "../ports/discord-port.ts";
-import { QuotaShrink } from "./quota-shrink.ts";
 import type { ReconcileStep } from "./reconcile-step.ts";
-import { SourceSetMirror } from "./source-set-mirror.ts";
-import { SyncReport } from "./sync-report.ts";
-import type { SyncContext } from "./sync-context.ts";
-import { TrendingFill } from "./trending-fill.ts";
+import type { SyncedServer } from "./synced-server.ts";
+import type { SyncReport } from "./sync-report.ts";
 
-/** Brings a Server's emojis in line with 7TV and the stored state. */
+/** Brings a Server's emojis in line with 7TV and the stored state inside an active session. */
 export class Reconciler {
-  private readonly steps: ReadonlyArray<ReconcileStep>;
+  public constructor(private readonly steps: readonly ReconcileStep[]) {}
 
-  public constructor(private readonly context: SyncContext) {
-    this.steps = [new QuotaShrink(context), new SourceSetMirror(context), new TrendingFill(context)];
-  }
-
-  public async reconcile(server: ServerId): Promise<SyncResult> {
-    if (!(await this.context.discord.hasManageExpressions(server))) {
-      return SyncReport.single("error", new MissingPermissionError(server).toFeedback().text);
-    }
-    const synced = await this.context.load(server);
-    const report = new SyncReport();
+  public async reconcile(synced: SyncedServer, report: SyncReport): Promise<void> {
     synced.state.beginProblemReview();
-    try {
-      for (const step of this.steps) report.merge(await step.run(synced));
-      synced.state.endProblemReview(); // only a full run knows which problems are gone
-    } catch (err) {
-      // Stop at the first domain error (e.g. missing permission) but keep the state of what was done.
-      if (err instanceof DisplacementError && err.cause instanceof RateLimitError) throw err.cause;
-      if (!(err instanceof DomainError)) throw err;
-      report.say(err.toFeedback().level, err.toFeedback().text);
-    } finally {
-      // Whatever was applied is persisted, even when an unexpected error propagates, so
-      // emojis created in this run are not mistaken for hand-made ones on the next load.
-      await this.context.store.save(server, synced.state);
-    }
-    return report.toResult();
+    for (const step of this.steps) await step.run(synced, report);
+    synced.state.endProblemReview(); // Only a full run knows which problems are gone.
   }
 }

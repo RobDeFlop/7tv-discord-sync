@@ -1,6 +1,6 @@
 import { describe, expect, jest, test } from "bun:test";
 import { RateLimitError } from "../adapters/discord/write-queue.ts";
-import { ConfigureLogChannelCommand, LinkSourceSetCommand, SyncCore } from "../core/index.ts";
+import { ConfigureLogChannelCommand, SyncCore } from "../core/index.ts";
 import type { ServerId } from "../domain/index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
 import { FeedbackRouter } from "./feedback-router.ts";
@@ -23,7 +23,7 @@ function setup() {
   sevenTv.addUser({ id: "u1", username: "streamer", activeSetId: "setA" });
   sevenTv.addEmote({ id: "e1", name: "Pog", animated: false });
   sevenTv.setEmotes("setA", "A", ["e1"]);
-  const link = (server: ServerId) => core.apply(server, new LinkSourceSetCommand("https://7tv.app/users/u1"));
+  const link = (server: ServerId) => core.linkSourceSet(server, "https://7tv.app/users/u1");
   const names = (server: ServerId) => discord.emojis(server).map((e) => e.name);
   return { discord, sevenTv, store, core, log, servers, events, link, names };
 }
@@ -178,7 +178,7 @@ describe("feedback routing", () => {
     await core.apply(A, new ConfigureLogChannelCommand("chan-1"));
     discord.revokeManageExpressions(A);
     discord.seedEmoji(A, { name: "x", animated: false });
-    await core.apply(A, new LinkSourceSetCommand("https://7tv.app/users/u1")); // no permission, feedback ignored here
+    await core.linkSourceSet(A, "https://7tv.app/users/u1"); // no permission, feedback ignored here
     expect(log.sent).toEqual([]);
     await events.emojiChanged(A);
     expect(log.sent).toHaveLength(1);

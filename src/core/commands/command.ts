@@ -1,8 +1,10 @@
-import type { ServerId, SyncResult } from "../../domain/index.ts";
-import type { SyncContext } from "../sync-context.ts";
+import type { SyncedServer } from "../synced-server.ts";
+import type { SyncReport } from "../sync-report.ts";
 
 /** An admin command. Each subclass knows how to carry itself out. */
 export abstract class Command {
-  /** May throw a DomainError; the sync core turns it into feedback. */
-  public abstract execute(server: ServerId, context: SyncContext): Promise<SyncResult>;
+  public readonly requestsSync: boolean = false;
+
+  /** The Server session persists state and translates DomainError into feedback. */
+  public abstract execute(synced: SyncedServer, report: SyncReport): Promise<void>;
 }

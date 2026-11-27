@@ -1,4 +1,4 @@
-import { AddEmoteCommand, type EmoteAddPreparation, type PreparedEmoteAdd, type SyncCore } from "../core/index.ts";
+import type { EmoteAddPreparation, PreparedEmoteAdd, SyncCore } from "../core/index.ts";
 import { EmoteNamer, type ServerId } from "../domain/index.ts";
 import type { EmoteAddInteraction } from "./emote-add-interaction.ts";
 import { FeedbackRouter } from "./feedback-router.ts";
@@ -66,7 +66,7 @@ export class EmoteAddPreviews {
     let reply: string;
     try {
       const { feedback } = await this.lock.run(pending.serverId, () =>
-        this.core.apply(pending.serverId, new AddEmoteCommand(pending.prepared, name)),
+        this.core.addEmote(pending.serverId, pending.prepared, name),
       );
       reply = FeedbackRouter.format(feedback.map((message) => {
         const nextStep = message.reason === "emote-name-taken" ? "and choose another name."

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AddEmoteCommand, LinkSourceSetCommand, SyncCore } from "./index.ts";
+import { SyncCore } from "./index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
 
 const S = "server-1";
@@ -19,17 +19,17 @@ function setup() {
 describe("promoting a managed emote with a requested name", () => {
   test("renames the emoji to the requested name", async () => {
     const { core, names } = setup();
-    await core.apply(S, new LinkSourceSetCommand("https://7tv.app/users/u1"));
-    const r = await core.apply(S, new AddEmoteCommand("https://7tv.app/emotes/a", "Wave"));
+    await core.linkSourceSet(S, "https://7tv.app/users/u1");
+    const r = await core.addEmote(S, "https://7tv.app/emotes/a", "Wave");
     expect(names()).toEqual(["Wave"]);
     expect(r.changes).toContainEqual({ type: "renamed", from: "AA", to: "Wave" });
   });
 
   test("applies the collision suffix rules and records the problem", async () => {
     const { discord, core, names } = setup();
-    await core.apply(S, new LinkSourceSetCommand("https://7tv.app/users/u1"));
+    await core.linkSourceSet(S, "https://7tv.app/users/u1");
     discord.seedEmoji(S, { name: "Wave", animated: false });
-    const r = await core.apply(S, new AddEmoteCommand("https://7tv.app/emotes/a", "Wave"));
+    const r = await core.addEmote(S, "https://7tv.app/emotes/a", "Wave");
     expect(names()).toEqual(["Wave", "Wave_2"]);
     expect(r.feedback.some((f) => f.level === "warning" && f.text.includes("Wave_2"))).toBe(true);
     const status = await core.status(S);

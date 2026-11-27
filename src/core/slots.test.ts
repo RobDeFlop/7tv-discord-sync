@@ -51,7 +51,7 @@ describe("add", () => {
   test("creates a Requested Emote named after the 7TV emote", async () => {
     const { sevenTv, core, names, discord } = setup();
     sevenTv.addEmote({ id: "e1", name: "Pog", animated: false });
-    const r = await core.apply(S, new AddEmoteCommand(link("e1")));
+    const r = await core.addEmote(S, link("e1"));
     expect(errors(r)).toEqual([]);
     expect(names()).toEqual(["Pog"]);
     expect(discord.emojis(S)[0]!.animated).toBe(false);
@@ -61,13 +61,13 @@ describe("add", () => {
   test("optional name overrides the 7TV name", async () => {
     const { sevenTv, core, names } = setup();
     sevenTv.addEmote({ id: "e1", name: "Pog", animated: false });
-    await core.apply(S, new AddEmoteCommand(link("e1"), "mine"));
+    await core.addEmote(S, link("e1"), "mine");
     expect(names()).toEqual(["mine"]);
   });
 
   test("invalid link gives a helpful error and creates nothing", async () => {
     const { core, names } = setup();
-    const r = await core.apply(S, new AddEmoteCommand("https://example.com/nope"));
+    const r = await core.addEmote(S, "https://example.com/nope");
     expect(errors(r).length).toBe(1);
     expect(errors(r)[0]!.text).toContain("7TV");
     expect(names()).toEqual([]);
@@ -78,9 +78,9 @@ describe("add", () => {
     sevenTv.addEmote({ id: "e1", name: "cat-face!", animated: false });
     sevenTv.addEmote({ id: "e2", name: "a", animated: false });
     sevenTv.addEmote({ id: "e3", name: "x".repeat(40), animated: false });
-    await core.apply(S, new AddEmoteCommand(link("e1")));
-    await core.apply(S, new AddEmoteCommand(link("e2")));
-    await core.apply(S, new AddEmoteCommand(link("e3")));
+    await core.addEmote(S, link("e1"));
+    await core.addEmote(S, link("e2"));
+    await core.addEmote(S, link("e3"));
     expect(names()).toEqual(["a_", "cat_face_", "x".repeat(32)].sort());
   });
 
@@ -89,8 +89,8 @@ describe("add", () => {
     discord.seedEmoji(S, { name: "Pog", animated: false });
     sevenTv.addEmote({ id: "e1", name: "Pog", animated: false });
     sevenTv.addEmote({ id: "e2", name: "Pog", animated: false });
-    const r1 = await core.apply(S, new AddEmoteCommand(link("e1")));
-    const r2 = await core.apply(S, new AddEmoteCommand(link("e2")));
+    const r1 = await core.addEmote(S, link("e1"));
+    const r2 = await core.addEmote(S, link("e2"));
     expect(names()).toEqual(["Pog", "Pog_2", "Pog_3"]);
     expect(r1.feedback.some((f) => f.text.includes("Pog_2"))).toBe(true);
     expect(r2.feedback.some((f) => f.text.includes("Pog_3"))).toBe(true);
@@ -102,15 +102,15 @@ describe("add", () => {
     const long = "y".repeat(32);
     discord.seedEmoji(S, { name: long, animated: false });
     sevenTv.addEmote({ id: "e1", name: long, animated: false });
-    await core.apply(S, new AddEmoteCommand(link("e1")));
+    await core.addEmote(S, link("e1"));
     expect(names()).toContain("y".repeat(30) + "_2");
   });
 
   test("adding an emote already present does not duplicate it", async () => {
     const { sevenTv, core, names } = setup();
     sevenTv.addEmote({ id: "e1", name: "Pog", animated: false });
-    await core.apply(S, new AddEmoteCommand(link("e1")));
-    await core.apply(S, new AddEmoteCommand(link("e1")));
+    await core.addEmote(S, link("e1"));
+    await core.addEmote(S, link("e1"));
     expect(names()).toEqual(["Pog"]);
   });
 });
@@ -121,8 +121,8 @@ describe("quotas", () => {
     for (let i = 0; i < 50; i++) discord.seedEmoji(S, { name: `an${i}`, animated: true });
     sevenTv.addEmote({ id: "e1", name: "Dance", animated: true });
     sevenTv.addEmote({ id: "e2", name: "Still", animated: false });
-    const r1 = await core.apply(S, new AddEmoteCommand(link("e1")));
-    const r2 = await core.apply(S, new AddEmoteCommand(link("e2")));
+    const r1 = await core.addEmote(S, link("e1"));
+    const r2 = await core.addEmote(S, link("e2"));
     expect(errors(r1).length).toBe(1);
     expect(errors(r2)).toEqual([]);
     expect(names(false)).toEqual(["Still"]);
@@ -134,8 +134,8 @@ describe("quotas", () => {
     for (let i = 0; i < 49; i++) discord.seedEmoji(S, { name: `hand${i}`, animated: false });
     sevenTv.addEmote({ id: "e1", name: "One", animated: false });
     sevenTv.addEmote({ id: "e2", name: "Two", animated: false });
-    await core.apply(S, new AddEmoteCommand(link("e1")));
-    const r = await core.apply(S, new AddEmoteCommand(link("e2")));
+    await core.addEmote(S, link("e1"));
+    const r = await core.addEmote(S, link("e2"));
     expect(errors(r).length).toBe(1);
     expect(names()).not.toContain("Two");
     expect(names()).toContain("One");
@@ -146,7 +146,7 @@ describe("quotas", () => {
     const { sevenTv, discord, core } = setup();
     discord.seedEmoji(S, { name: "hand", animated: false });
     sevenTv.addEmote({ id: "e1", name: "One", animated: false });
-    await core.apply(S, new AddEmoteCommand(link("e1")));
+    await core.addEmote(S, link("e1"));
     const st = await core.status(S);
     expect(st.quotas.static).toEqual({
       used: 2,
@@ -161,7 +161,7 @@ describe("too-large images", () => {
   test("skipped with feedback and recorded as a problem", async () => {
     const { sevenTv, core, names } = setup();
     sevenTv.addEmote({ id: "e1", name: "Huge", animated: true }, { imageBytes: 300 * 1024 });
-    const r = await core.apply(S, new AddEmoteCommand(link("e1")));
+    const r = await core.addEmote(S, link("e1"));
     expect(errors(r).length).toBe(1);
     expect(names()).toEqual([]);
     expect((await core.status(S)).problems.map((p) => p.kind)).toContain("too-large");
@@ -188,16 +188,16 @@ describe("Displacement by Precedence", () => {
     const { core, names } = await fullQuotaWithLowerTiers();
     const hand = names().filter((n) => n.startsWith("hand"));
 
-    const r1 = await core.apply(S, new AddEmoteCommand(link("a")));
+    const r1 = await core.addEmote(S, link("a"));
     expect(errors(r1)).toEqual([]);
     expect(names()).not.toContain("trendEmote");
     expect(names()).toContain("srcEmote");
     expect(r1.feedback.some((f) => f.level === "warning")).toBe(true);
 
-    await core.apply(S, new AddEmoteCommand(link("b")));
+    await core.addEmote(S, link("b"));
     expect(names()).not.toContain("srcEmote");
 
-    const r3 = await core.apply(S, new AddEmoteCommand(link("c")));
+    const r3 = await core.addEmote(S, link("c"));
     expect(errors(r3).length).toBe(1);
     expect(names()).toEqual(expect.arrayContaining([...hand, "newa", "newb"]));
     expect(names().length).toBe(50);
@@ -206,7 +206,7 @@ describe("Displacement by Precedence", () => {
   test("lower-tier emotes in the other quota are never displaced", async () => {
     const { core, sevenTv, names } = await fullQuotaWithLowerTiers();
     sevenTv.addEmote({ id: "anim", name: "anim", animated: true });
-    await core.apply(S, new AddEmoteCommand(link("anim")));
+    await core.addEmote(S, link("anim"));
     expect(names()).toContain("srcEmote");
     expect(names()).toContain("trendEmote");
   });
@@ -216,8 +216,8 @@ describe("remove", () => {
   test("removes a Managed Emote", async () => {
     const { sevenTv, core, names } = setup();
     sevenTv.addEmote({ id: "e1", name: "Pog", animated: false });
-    await core.apply(S, new AddEmoteCommand(link("e1")));
-    const r = await core.apply(S, new RemoveEmoteCommand("Pog"));
+    await core.addEmote(S, link("e1"));
+    const r = await core.removeEmote(S, "Pog");
     expect(errors(r)).toEqual([]);
     expect(names()).toEqual([]);
     expect((await core.status(S)).quotas.static.byTier.requested).toBe(0);
@@ -226,14 +226,14 @@ describe("remove", () => {
   test("refuses Reserved Slots", async () => {
     const { discord, core, names } = setup();
     discord.seedEmoji(S, { name: "hand", animated: false });
-    const r = await core.apply(S, new RemoveEmoteCommand("hand"));
+    const r = await core.removeEmote(S, "hand");
     expect(errors(r).length).toBe(1);
     expect(names()).toEqual(["hand"]);
   });
 
   test("unknown name gives an error", async () => {
     const { core } = setup();
-    const r = await core.apply(S, new RemoveEmoteCommand("ghost"));
+    const r = await core.removeEmote(S, "ghost");
     expect(errors(r).length).toBe(1);
   });
 });
@@ -243,7 +243,7 @@ describe("static and animated pools", () => {
     const { discord, sevenTv, core } = setup(); // 50 static + 50 animated
     for (let i = 0; i < 50; i++) discord.seedEmoji(S, { name: `hand${i}`, animated: false });
     sevenTv.addEmote({ id: "a1", name: "jam", animated: true });
-    const r = await core.apply(S, new AddEmoteCommand(link("a1")));
+    const r = await core.addEmote(S, link("a1"));
     expect(errors(r)).toEqual([]);
     const st = await core.status(S);
     expect(st.quotas.static).toMatchObject({ used: 50, free: 0 });

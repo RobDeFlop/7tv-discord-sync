@@ -1,10 +1,7 @@
-import type { SyncResult } from "../domain/index.ts";
-import type { SyncContext } from "./sync-context.ts";
 import type { SyncedServer } from "./synced-server.ts";
+import type { SyncReport } from "./sync-report.ts";
 
-/** One stage of a reconcile, run in Precedence order (Source Set, later Trending Fill). */
+/** One stage of a reconcile, run in Precedence order. */
 export abstract class ReconcileStep {
-  public constructor(protected readonly context: SyncContext) {}
-
-  public abstract run(synced: SyncedServer): Promise<SyncResult>;
+  public abstract run(synced: SyncedServer, report: SyncReport): Promise<void>;
 }

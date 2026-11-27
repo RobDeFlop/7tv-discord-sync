@@ -1,6 +1,6 @@
-import { ServerQuotas, type Quota, type SyncResult } from "../domain/index.ts";
+import { ServerQuotas, type Quota } from "../domain/index.ts";
 import { ReconcileStep } from "./reconcile-step.ts";
-import { SyncReport } from "./sync-report.ts";
+import type { SyncReport } from "./sync-report.ts";
 import type { SyncedServer } from "./synced-server.ts";
 
 /**
@@ -11,13 +11,11 @@ import type { SyncedServer } from "./synced-server.ts";
  * never touched. Runs before the steps that fill slots.
  */
 export class QuotaShrink extends ReconcileStep {
-  public async run(synced: SyncedServer): Promise<SyncResult> {
-    const report = new SyncReport();
+  public override async run(synced: SyncedServer, report: SyncReport): Promise<void> {
     const quotas = await synced.quotas();
     for (const quota of ServerQuotas.ALL) {
       await this.shrink(synced, report, quota, synced.usedIn(quota) - quotas.limit());
     }
-    return report.toResult();
   }
 
   private async shrink(synced: SyncedServer, report: SyncReport, quota: Quota, excess: number): Promise<void> {

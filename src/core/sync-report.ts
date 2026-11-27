@@ -13,8 +13,8 @@ export class SyncReport {
     this.changes.push(change);
   }
 
-  public say(level: FeedbackMessage["level"], text: string): void {
-    this.feedback.push({ level, text });
+  public say(level: FeedbackMessage["level"], text: string, reason?: FeedbackMessage["reason"]): void {
+    this.feedback.push(reason ? { level, text, reason } : { level, text });
   }
 
   public merge(result: SyncResult): void {

@@ -58,7 +58,6 @@ test("a prepared upload protects emote metadata and image bytes from mutation", 
   const emote = { id: "e1", name: "Original", animated: false };
   const image = { bytes: Buffer.from([1, 2, 3]), animated: false };
   const prepared = new PreparedEmoteUpload(emote, "Displayed", image);
-  const command = new AddEmoteCommand(prepared);
 
   emote.id = "different";
   image.bytes.fill(0);
@@ -66,7 +65,7 @@ test("a prepared upload protects emote metadata and image bytes from mutation", 
   prepared.emote.id = "also-different";
   prepared.uploadImage.bytes.fill(0);
 
-  await core.apply(SERVER, command);
+  await core.addEmote(SERVER, prepared);
 
   const [emoji] = discord.emojis(SERVER);
   expect(emoji?.name).toBe("Displayed");

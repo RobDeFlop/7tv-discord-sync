@@ -1,8 +1,10 @@
-import { EmoteNamer, ServerQuotas, type SevenTvEmote, type SyncResult } from "../domain/index.ts";
+import { EmoteNamer, ServerQuotas, type SevenTvEmote } from "../domain/index.ts";
+import type { SevenTvPort } from "../ports/index.ts";
 import { ImageFailure } from "./image-failure.ts";
 import { NameCollision } from "./name-collision.ts";
 import { ReconcileStep } from "./reconcile-step.ts";
-import { SyncReport } from "./sync-report.ts";
+import type { SlotAllocator } from "./slot-allocator.ts";
+import type { SyncReport } from "./sync-report.ts";
 import type { SyncedServer } from "./synced-server.ts";
 
 /**
@@ -11,23 +13,26 @@ import type { SyncedServer } from "./synced-server.ts";
  * what does not fit as pending.
  */
 export class SourceSetMirror extends ReconcileStep {
-  public async run(synced: SyncedServer): Promise<SyncResult> {
+  public constructor(private readonly sevenTv: SevenTvPort, private readonly allocator: SlotAllocator) {
+    super();
+  }
+
+  public override async run(synced: SyncedServer, report: SyncReport): Promise<void> {
     const { state } = synced;
-    const report = new SyncReport();
     if (!state.linkedUserId) {
       state.clearPending();
-      return report.toResult();
+      return;
     }
 
-    const user = await this.context.sevenTv.getUser(state.linkedUserId);
+    const user = await this.sevenTv.getUser(state.linkedUserId);
     if (!user) {
       report.say("warning", "The linked 7TV user could not be found; the Source Set was not synced.");
-      return report.toResult();
+      return;
     }
-    const set = user.activeSetId ? await this.context.sevenTv.getSet(user.activeSetId) : null;
+    const set = user.activeSetId ? await this.sevenTv.getSet(user.activeSetId) : null;
     if (user.activeSetId && !set) {
       report.say("warning", "The active 7TV set could not be found; the Source Set was not synced.");
-      return report.toResult();
+      return;
     }
     const hadPending = state.pendingEmoteIds();
     state.clearPending();
@@ -37,7 +42,6 @@ export class SourceSetMirror extends ReconcileStep {
     await this.renameAndPromote(synced, report, wanted);
     const pending = await this.addMissing(synced, report, wanted);
     this.recordPending(synced, report, pending, hadPending);
-    return report.toResult();
   }
 
   /** Source Set emotes that left the set. Requested Emotes stay. */
@@ -76,17 +80,17 @@ export class SourceSetMirror extends ReconcileStep {
     for (const emote of wanted) {
       if (state.findManaged(emote.id)) continue;
       const quota = ServerQuotas.quotaOf(emote.animated);
-      const plan = await this.context.allocator.plan(synced, quota, "source");
+      const plan = await this.allocator.plan(synced, quota, "source");
       if (!plan.ok) {
         pending.push(emote);
         continue;
       }
-      const image = await this.context.sevenTv.downloadImage(emote.id);
+      const image = await this.sevenTv.downloadImage(emote.id);
       if (!image.ok) {
         new ImageFailure(emote, image.reason).recordOnce(state, report);
         continue;
       }
-      const placed = await this.context.allocator.place(synced, report, plan, emote, image.image, "source", emote.name);
+      const placed = await this.allocator.place(synced, report, plan, emote, image.image, "source", emote.name);
       if (placed.suffixed) {
         const collision = NameCollision.onAdd(emote.name, placed.name, emote.id);
         if (collision.record(state)) report.say("warning", collision.text);

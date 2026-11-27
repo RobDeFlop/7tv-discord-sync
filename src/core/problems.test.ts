@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AddEmoteCommand, LinkSourceSetCommand, RemoveEmoteCommand, SetTrendingCommand, SyncCore } from "./index.ts";
+import { SetTrendingCommand, SyncCore } from "./index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
 
 const S = "server-1";
@@ -28,7 +28,7 @@ describe("problems only show what is current", () => {
     emotes(["big"]);
     sevenTv.setImageSize("big", TOO_BIG);
     sevenTv.setEmotes("setA", "Main", ["big"]);
-    await core.apply(S, new LinkSourceSetCommand(userLink));
+    await core.linkSourceSet(S, userLink);
     expect(await problems()).toHaveLength(1);
     sevenTv.setEmotes("setA", "Main", []);
     await core.reconcile(S);
@@ -40,7 +40,7 @@ describe("problems only show what is current", () => {
     emotes(["big"]);
     sevenTv.setImageSize("big", TOO_BIG);
     sevenTv.setEmotes("setA", "Main", ["big"]);
-    await core.apply(S, new LinkSourceSetCommand(userLink));
+    await core.linkSourceSet(S, userLink);
     sevenTv.setImageSize("big", 1024);
     await core.reconcile(S);
     expect(names()).toEqual(["BIGBIG"]);
@@ -52,7 +52,7 @@ describe("problems only show what is current", () => {
     emotes(["a"]);
     discord.seedEmoji(S, { name: "AA", animated: false });
     sevenTv.setEmotes("setA", "Main", ["a"]);
-    await core.apply(S, new LinkSourceSetCommand(userLink));
+    await core.linkSourceSet(S, userLink);
     expect((await problems()).map((p) => p.kind)).toEqual(["renamed-with-suffix"]);
     sevenTv.setEmotes("setA", "Main", []);
     await core.reconcile(S);
@@ -117,7 +117,7 @@ describe("Trending Fill and Source Set renames are no longer silent", () => {
     const { discord, sevenTv, core, emotes, names, problems } = setup();
     emotes(["a"]);
     sevenTv.setEmotes("setA", "Main", ["a"]);
-    await core.apply(S, new LinkSourceSetCommand(userLink));
+    await core.linkSourceSet(S, userLink);
     discord.seedEmoji(S, { name: "Zed", animated: false });
     sevenTv.renameEmote("a", "Zed");
     const r = await core.reconcile(S);
@@ -132,8 +132,8 @@ describe("removing a mirrored emote", () => {
     const { sevenTv, core, emotes } = setup();
     emotes(["a"]);
     sevenTv.setEmotes("setA", "Main", ["a"]);
-    await core.apply(S, new LinkSourceSetCommand(userLink));
-    const r = await core.apply(S, new RemoveEmoteCommand("AA"));
+    await core.linkSourceSet(S, userLink);
+    const r = await core.removeEmote(S, "AA");
     const text = r.feedback.map((f) => f.text).join(" ");
     expect(text).toContain("7TV set");
   });
@@ -143,17 +143,17 @@ describe("removing a mirrored emote", () => {
     emotes(["t"]);
     sevenTv.setTrending("week", ["t"]);
     await core.apply(S, new SetTrendingCommand(true));
-    const r = await core.apply(S, new RemoveEmoteCommand("TT"));
+    const r = await core.removeEmote(S, "TT");
     expect(r.feedback.map((f) => f.text).join(" ")).toContain("Trending Fill");
   });
 
   test("warns when a removed Requested Emote is still in the active Source Set", async () => {
     const { sevenTv, core, emotes, names } = setup();
     emotes(["r"]);
-    await core.apply(S, new AddEmoteCommand("https://7tv.app/emotes/r", "mine"));
+    await core.addEmote(S, "https://7tv.app/emotes/r", "mine");
     sevenTv.setEmotes("setA", "Main", ["r"]);
-    await core.apply(S, new LinkSourceSetCommand(userLink));
-    const result = await core.apply(S, new RemoveEmoteCommand("mine"));
+    await core.linkSourceSet(S, userLink);
+    const result = await core.removeEmote(S, "mine");
     expect(warnings(result).map((f) => f.text).join(" ")).toContain("Source Set");
     expect(names()).toEqual([]);
     await core.reconcile(S);
@@ -163,8 +163,8 @@ describe("removing a mirrored emote", () => {
   test("a Requested Emote removal needs no warning", async () => {
     const { core, emotes } = setup();
     emotes(["r"]);
-    await core.apply(S, new AddEmoteCommand("https://7tv.app/emotes/r"));
-    const r = await core.apply(S, new RemoveEmoteCommand("RR"));
+    await core.addEmote(S, "https://7tv.app/emotes/r");
+    const r = await core.removeEmote(S, "RR");
     expect(r.feedback.map((f) => f.text)).toEqual(["Removed RR."]);
   });
 });

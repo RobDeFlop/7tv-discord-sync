@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AddEmoteCommand, LinkSourceSetCommand, SetTrendingCommand, SyncCore } from "./index.ts";
+import { SetTrendingCommand, SyncCore } from "./index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
 
 const S = "server-1";
@@ -86,11 +86,11 @@ describe("Trending Fill", () => {
     await core.apply(S, new SetTrendingCommand(true));
     expect((await core.status(S)).quotas.static.byTier.trending).toBe(2);
 
-    await core.apply(S, new LinkSourceSetCommand("https://7tv.app/users/u1"));
+    await core.linkSourceSet(S, "https://7tv.app/users/u1");
     let st = await core.status(S);
     expect(st.quotas.static.byTier).toMatchObject({ source: 1, trending: 1 });
 
-    await core.apply(S, new AddEmoteCommand(emoteLink("r1")));
+    await core.addEmote(S, emoteLink("r1"));
     st = await core.status(S);
     expect(st.quotas.static.byTier).toMatchObject({ requested: 1, source: 1, trending: 0 });
 
@@ -103,7 +103,7 @@ describe("Trending Fill", () => {
     emotes(["a", "b"]);
     sevenTv.setEmotes("setA", "Main", ["a"]);
     sevenTv.setTrending("week", ["a", "b"]);
-    await core.apply(S, new LinkSourceSetCommand("https://7tv.app/users/u1"));
+    await core.linkSourceSet(S, "https://7tv.app/users/u1");
     await core.apply(S, new SetTrendingCommand(true));
     expect(names()).toEqual(["AA", "BB"]);
     expect((await core.status(S)).quotas.static.byTier).toMatchObject({ source: 1, trending: 1 });
@@ -114,7 +114,7 @@ describe("Trending Fill", () => {
     emotes(["a", "b", "t"]);
     sevenTv.setEmotes("setA", "Main", ["a"]);
     sevenTv.setTrending("week", ["t", "b"]);
-    await core.apply(S, new LinkSourceSetCommand("https://7tv.app/users/u1"));
+    await core.linkSourceSet(S, "https://7tv.app/users/u1");
     await core.apply(S, new SetTrendingCommand(true));
     expect(names()).toEqual(["AA", "BB", "TT"]);
     const r = await core.apply(S, new SetTrendingCommand(false));
