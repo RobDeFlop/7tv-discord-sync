@@ -22,7 +22,7 @@ export * from "./commands/index.ts";
 
 type EmoteAddPreparation =
   | ({ originalName: string; previewImage: EmojiImage } & (
-    | { prepared: PreparedEmoteAdd }
+    | { prepared: PreparedEmoteAdd; slotNotice?: string }
     | { importFailure: "too-large" }
   ))
   | { feedback: FeedbackMessage };
@@ -63,13 +63,17 @@ export class SyncCore {
       return { feedback: { level: "error", text: `Could not preview this emote. ${new ImageFailure(emote, result.reason).text}` } };
     }
 
+    let slotNotice: string | undefined;
     let defaultName = existing?.name;
     if (defaultName === undefined) {
-      const plan = await this.context.allocator.plan(synced, ServerQuotas.quotaOf(emote.animated), "requested");
+      const quota = ServerQuotas.quotaOf(emote.animated);
+      const plan = await this.context.allocator.plan(synced, quota, "requested");
+      if (!plan.ok) slotNotice = `The ${quota} quota is full. No Managed Emote is eligible for displacement.`;
+      else if (plan.displace) slotNotice = `The ${quota} quota is full. Adding this emote could remove a lower-precedence Managed Emote.`;
       defaultName = this.context.allocator.placementName(synced, emote.name, plan.ok ? plan.displace : null).name;
     }
     const prepared = new PreparedEmoteUpload(emote, defaultName, result.image);
-    return { originalName: emote.name, previewImage: prepared.uploadImage, prepared };
+    return { originalName: emote.name, previewImage: prepared.uploadImage, prepared, slotNotice };
   }
 
   /** Apply an admin command to a Server. Domain errors come back as feedback. */

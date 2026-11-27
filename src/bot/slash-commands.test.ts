@@ -142,8 +142,8 @@ function setup() {
     await registry.handle(req);
     return req;
   };
-  const openPreview = async () => {
-    const { preview } = await run("emote add", { link: EMOTE_LINK });
+  const openPreview = async (link = EMOTE_LINK) => {
+    const { preview } = await run("emote add", { link });
     if (preview?.id === undefined) throw new Error("Expected an importable emote preview");
     return preview;
   };
@@ -202,6 +202,34 @@ describe("/emote add preview", () => {
     expect((await store.load(S)).requestedEmotes).toEqual([{ sevenTvEmoteId: "e1", requestedName: "Pog_Champ" }]);
     expect(discord.emojis(S).map((e) => e.name)).toEqual(["Pog_Champ"]);
     expect(sevenTv.downloadCount("e1")).toBe(1);
+  });
+
+  test("a full animated quota warns only for new animated imports and excludes Requested and Reserved slots", async () => {
+    const { discord, sevenTv, run, events, openPreview, interact } = setup();
+    sevenTv.addEmote({ id: "mirror", name: "Mirror", animated: true });
+    sevenTv.addEmote({ id: "new", name: "New", animated: true });
+    sevenTv.setEmotes("setA", "A", ["mirror"]);
+    await run("set link", { link: "https://7tv.app/users/u1" });
+    await events.idle();
+    for (let i = 0; i < 49; i++) discord.seedEmoji(S, { name: `Reserved_${i}`, animated: true });
+
+    expect((await openPreview()).slotNotice).toBeUndefined();
+    const newLink = "https://7tv.app/emotes/new";
+    const displaceable = await openPreview(newLink);
+    expect(displaceable.slotNotice).toContain("animated quota is full");
+    expect(displaceable.slotNotice).toContain("could remove a lower-precedence Managed Emote");
+
+    const promotion = await openPreview("https://7tv.app/emotes/mirror");
+    expect(promotion.slotNotice).toBeUndefined();
+    await interact(promotion.id, { kind: "add" });
+    expect((await interact(displaceable.id, { kind: "add" })).text).toContain("No free animated slot");
+    const full = await openPreview(newLink);
+    expect(full.slotNotice).toContain("No Managed Emote is eligible for displacement");
+
+    const reserved = discord.emojis(S).find((emoji) => emoji.name === "Reserved_0")!;
+    discord.removeEmojiByHand(S, reserved.id);
+    expect((await interact(full.id, { kind: "add" })).text).toContain("Added New");
+    expect(discord.emojis(S).some((emoji) => emoji.name === "Mirror")).toBe(true);
   });
 
   test("changing the preview image or its bytes cannot affect the uploaded image", async () => {

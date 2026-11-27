@@ -56,6 +56,7 @@ export class DiscordJsEmoteAddInteraction extends EmoteAddInteraction {
       embed.setDescription(preview.importError);
       return reply;
     }
+    if (preview.slotNotice) embed.setDescription(preview.slotNotice);
     if (preview.defaultName !== preview.originalName) {
       embed.addFields({ name: "Add as", value: escapeMarkdown(preview.defaultName) });
     }
