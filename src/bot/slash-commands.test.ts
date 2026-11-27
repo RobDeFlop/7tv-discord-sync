@@ -189,6 +189,7 @@ describe("/emote add preview", () => {
     const { discord, sevenTv, store, openPreview, interact } = setup();
     sevenTv.renameEmote("e1", "Pog Champ");
     const preview = await openPreview();
+    expect(preview.emoteUrl).toBe(EMOTE_LINK);
     expect(preview.originalName).toBe("Pog Champ");
     expect(preview.defaultName).toBe("Pog_Champ");
     expect(preview.image.bytes.byteLength).toBe(1024);

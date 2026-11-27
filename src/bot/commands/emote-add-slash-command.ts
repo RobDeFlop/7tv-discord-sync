@@ -30,11 +30,11 @@ export class EmoteAddSlashCommand extends SlashCommand {
     const preparation = await this.core.prepareEmoteAdd(serverId, this.requiredString(request, "link"));
     if ("feedback" in preparation) return FeedbackRouter.format([preparation.feedback]);
 
-    const { originalName, previewImage: image } = preparation;
+    const { emote, previewImage: image } = preparation;
+    const preview = { emoteUrl: `https://7tv.app/emotes/${emote.id}`, originalName: emote.name, image };
     if ("importFailure" in preparation) {
       return {
-        originalName,
-        image,
+        ...preview,
         importError: "This emote cannot be imported: its converted image exceeds Discord's 256 KB emoji limit.",
       };
     }
@@ -45,7 +45,7 @@ export class EmoteAddSlashCommand extends SlashCommand {
     timer.unref();
     const { prepared } = preparation;
     this.pending.set(id, { serverId, userId: request.userId, prepared, expiresAt, timer });
-    return { id, originalName, defaultName: prepared.defaultName, image, slotNotice: preparation.slotNotice };
+    return { ...preview, id, defaultName: prepared.defaultName, slotNotice: preparation.slotNotice };
   }
 
   public async handleInteraction(request: EmoteAddInteraction): Promise<void> {

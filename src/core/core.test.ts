@@ -8,7 +8,7 @@ import {
   SyncCore,
   UnlinkSourceSetCommand,
 } from "./index.ts";
-import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
+import { FakeDiscord, FakeSevenTv, FakeStore, MAX_EMOJI_BYTES } from "../testing/fakes.ts";
 
 const SERVER = "server-1";
 
@@ -33,6 +33,21 @@ test("config command stores the log channel and returns feedback", async () => {
 
   expect(result.feedback.length).toBe(1);
   expect((await core.status(SERVER)).logChannelId).toBe("chan-9");
+});
+
+test("an oversized image returns a preview and an import failure instead of a prepared add", async () => {
+  const discord = new FakeDiscord();
+  discord.addServer(SERVER);
+  const sevenTv = new FakeSevenTv();
+  const emote = { id: "e1", name: "Oversized", animated: true };
+  sevenTv.addEmote(emote, { imageBytes: MAX_EMOJI_BYTES + 1 });
+  const core = new SyncCore(sevenTv, discord, new FakeStore());
+
+  expect(await core.prepareEmoteAdd(SERVER, "https://7tv.app/emotes/e1")).toEqual({
+    emote,
+    previewImage: { bytes: new Uint8Array(1024), animated: false },
+    importFailure: "too-large",
+  });
 });
 
 test("a prepared upload protects emote metadata and image bytes from mutation", async () => {
