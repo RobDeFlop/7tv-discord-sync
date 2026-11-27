@@ -1,0 +1,15 @@
+# Include only runtime sources, migration assets, locked manifests and the operator bundle.
+**
+!package.json
+!bun.lock
+!src/**/*.ts
+!src/adapters/store/migrations/*.sql
+!src/adapters/store/migrations/meta/*.json
+src/**/*.test.ts
+src/testing/**
+**/.env*
+**/*.env
+!install/.example.env
+!install/compose.yaml
+!install/compose.external.yaml
+!install/README.md

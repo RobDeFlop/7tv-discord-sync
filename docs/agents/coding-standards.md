@@ -16,6 +16,10 @@ The codebase is object-oriented TypeScript. Model behaviour with classes, use in
 - **Errors are a hierarchy.** A `DomainError` base for errors the core turns into feedback (`InvalidLinkError`, `QuotaFullError`, …). Adapter errors extend `Error` subclasses of their own (`RateLimitError`, `MissingPermissionError`).
 - Bot slash commands follow the same pattern: an abstract `SlashCommand` base handling admin checks and ephemeral replies, one subclass per command.
 
+## Enums
+
+Use implicit enum values by default. Assign explicit values only when a contract requires them, such as a wire format or stored identifier. Do not assign strings just to repeat member names.
+
 ## Value objects
 
 Use a small immutable class only for a domain value that carries more than one field or real behaviour, such as `ServerQuotas` (static/animated limits per boost level).
