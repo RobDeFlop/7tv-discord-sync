@@ -1,6 +1,7 @@
 import type { EmojiImage, ServerId } from "../domain/index.ts";
 
 export type EmoteAddPreview = {
+  emoteUrl: string;
   originalName: string;
   image: EmojiImage;
 } & (

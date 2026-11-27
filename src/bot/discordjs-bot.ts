@@ -7,6 +7,7 @@ import {
   type Interaction,
 } from "discord.js";
 import type { ServerId } from "../domain/index.ts";
+import { DetailedSlashReply } from "./detailed-slash-reply.ts";
 import { DiscordJsEmoteAddInteraction } from "./discordjs-emote-add.ts";
 import { LogChannel } from "./feedback-router.ts";
 import { ServerDirectory, type GatewayEvents } from "./gateway-events.ts";
@@ -54,9 +55,11 @@ export class DiscordJsSlashRequest extends SlashRequest {
   }
 
   public async reply(reply: SlashReply): Promise<void> {
+    const hasEmbedLinks = this.interaction.appPermissions.has(PermissionFlagsBits.EmbedLinks);
     const options = typeof reply === "string"
       ? { content: reply.slice(0, DiscordJsSlashRequest.MAX_MESSAGE) }
-      : "originalName" in reply ? DiscordJsEmoteAddInteraction.previewReply(reply) : { embeds: [reply] };
+      : "originalName" in reply ? DiscordJsEmoteAddInteraction.previewReply(reply, hasEmbedLinks)
+      : DetailedSlashReply.render(reply, hasEmbedLinks);
     if (this.interaction.deferred && !this.replied) await this.interaction.editReply(options);
     else if (this.replied || this.interaction.replied) await this.interaction.followUp({ ...options, flags: MessageFlags.Ephemeral });
     else await this.interaction.reply({ ...options, flags: MessageFlags.Ephemeral });

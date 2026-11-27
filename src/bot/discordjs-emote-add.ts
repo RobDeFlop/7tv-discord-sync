@@ -2,7 +2,8 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  EmbedBuilder,
+  type APIEmbed,
+  type APIEmbedField,
   LabelBuilder,
   MessageFlags,
   ModalBuilder,
@@ -15,6 +16,7 @@ import {
   type InteractionReplyOptions,
   type ModalSubmitInteraction,
 } from "discord.js";
+import { DetailedSlashReply } from "./detailed-slash-reply.ts";
 import type { ServerId } from "../domain/index.ts";
 import { EmoteAddInteraction, type EmoteAddAction, type EmoteAddPreview } from "./emote-add-interaction.ts";
 
@@ -45,21 +47,24 @@ export class DiscordJsEmoteAddInteraction extends EmoteAddInteraction {
     return null;
   }
 
-  public static previewReply(preview: EmoteAddPreview): Pick<InteractionReplyOptions, "embeds" | "files" | "components"> {
+  public static previewReply(preview: EmoteAddPreview, hasEmbedLinks: boolean): Pick<InteractionReplyOptions, "content" | "allowedMentions" | "embeds" | "files" | "components"> {
     const filename = preview.image.animated ? "preview.gif" : "preview.png";
-    const embed = new EmbedBuilder()
-      .setTitle("7TV emote preview")
-      .setImage(`attachment://${filename}`)
-      .addFields({ name: "Original 7TV name", value: escapeMarkdown(preview.originalName) });
-    const reply = { embeds: [embed], files: [{ attachment: Buffer.from(preview.image.bytes), name: filename }] };
-    if (preview.importError !== undefined) {
-      embed.setDescription(preview.importError);
-      return reply;
+    const fields: APIEmbedField[] = [{ name: "Original 7TV name", value: escapeMarkdown(preview.originalName) }];
+    if (preview.defaultName !== undefined && preview.defaultName !== preview.originalName) {
+      fields.push({ name: "Add as", value: escapeMarkdown(preview.defaultName) });
     }
-    if (preview.slotNotice) embed.setDescription(preview.slotNotice);
-    if (preview.defaultName !== preview.originalName) {
-      embed.addFields({ name: "Add as", value: escapeMarkdown(preview.defaultName) });
-    }
+    fields.push({ name: "7TV emote", value: preview.emoteUrl });
+    const embed: APIEmbed = {
+      title: preview.importError !== undefined ? "Cannot import this emote" : "Confirm emote add",
+      description: preview.importError !== undefined ? preview.importError : preview.slotNotice,
+      fields,
+      image: { url: `attachment://${filename}` },
+    };
+    const reply = {
+      ...DetailedSlashReply.render(embed, hasEmbedLinks),
+      ...(hasEmbedLinks ? { files: [{ attachment: Buffer.from(preview.image.bytes), name: filename }] } : {}),
+    };
+    if (preview.importError !== undefined) return reply;
     const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(this.customId(preview.id, "add")).setLabel("Add").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(this.customId(preview.id, "name")).setLabel("Choose name").setStyle(ButtonStyle.Secondary),

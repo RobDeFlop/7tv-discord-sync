@@ -3,6 +3,7 @@ import {
   ServerQuotas,
   type EmojiImage,
   type FeedbackMessage,
+  type SevenTvEmote,
   type ServerId,
   type ServerStatus,
   type SyncResult,
@@ -21,7 +22,7 @@ import type { SyncedServer } from "./synced-server.ts";
 export * from "./commands/index.ts";
 
 type EmoteAddPreparation =
-  | ({ originalName: string; previewImage: EmojiImage } & (
+  | ({ emote: SevenTvEmote; previewImage: EmojiImage } & (
     | { prepared: PreparedEmoteAdd; slotNotice?: string }
     | { importFailure: "too-large" }
   ))
@@ -54,12 +55,12 @@ export class SyncCore {
       if (existing) {
         const previewImage = await this.context.discord.downloadEmojiImage(server, existing);
         if (previewImage) return {
-          originalName: emote.name,
+          emote,
           previewImage,
           prepared: new PreparedEmotePromotion(emote, existing.name, existing.id),
         };
       }
-      if (result.reason === "too-large") return { originalName: emote.name, previewImage: result.previewImage, importFailure: result.reason };
+      if (result.reason === "too-large") return { emote, previewImage: result.previewImage, importFailure: result.reason };
       return { feedback: { level: "error", text: `Could not preview this emote. ${new ImageFailure(emote, result.reason).text}` } };
     }
 
@@ -73,7 +74,7 @@ export class SyncCore {
       defaultName = this.context.allocator.placementName(synced, emote.name, plan.ok ? plan.displace : null).name;
     }
     const prepared = new PreparedEmoteUpload(emote, defaultName, result.image);
-    return { originalName: emote.name, previewImage: prepared.uploadImage, prepared, slotNotice };
+    return { emote, previewImage: prepared.uploadImage, prepared, slotNotice };
   }
 
   /** Apply an admin command to a Server. Domain errors come back as feedback. */
