@@ -4,7 +4,7 @@ This file is the authority for repository-wide contributor and agent rules. Inst
 
 ## Before changing anything
 
-Read [PROJECT_STATUS.md](PROJECT_STATUS.md) for the current handoff, the relevant issue for acceptance criteria, and the nearest implementation, callers and tests. Verify the behavior against code rather than treating a status note or example as a spec. Use the single [glossary](GLOSSARY.md) in code, tests, issues and docs. Read relevant decisions under `docs/adr/` if present; surface conflicts before changing an accepted decision.
+Read the relevant issue for acceptance criteria and progress, and the nearest implementation, callers and tests. Verify the behavior against code rather than treating an issue note or example as a spec. Use the single [glossary](GLOSSARY.md) in code, tests, issues and docs. Read relevant decisions under `docs/adr/` if present; surface conflicts before changing an accepted decision.
 
 Fix the cause with the smallest change that satisfies the requirement. Reuse existing commands, policies and infrastructure. **Prefer** a direct implementation over a new abstraction; extract shared behavior when callers need the same rule. Do not add speculative extension points, dependencies, unrelated cleanup or workarounds. Remove code, imports and comments made obsolete by the change. A stub, hardcoded success or unimplemented path is outstanding work, not a completed feature.
 
@@ -41,7 +41,7 @@ Use `Logger.write` with the appropriate `LogLevel` for bot diagnostics. Its mess
 2. For code changes run `bun run typecheck` and the affected tests, e.g. `bun test ./src/core/slots.test.ts`. Before declaring the suite green, run `bun test --timeout 30000` with `TEST_DATABASE_URL` set to a **disposable test database**. The store suite migrates and deletes test state; it ignores `DATABASE_URL` and skips when `TEST_DATABASE_URL` is unset. Never use an operator database.
 3. Run configured format and lint checks when available. Currently neither is configured: match adjacent TypeScript style, review the diff for unused imports and dead code, and run `git diff --check` for whitespace. That command is not a linter. For docs-only edits, verify paths, links, commands and behavior claims against their owners; runtime tests are not required unless the edit changes an executable example that needs them.
 4. For packaging or deployment changes, use the matching checks in `.github/workflows/test-image.yml`, `scripts/test-compose.sh` or `scripts/test-install-bundle.sh`; verify the operator-facing artifact, not just the source. Never weaken a check, skip a failure or regenerate expected output merely to pass. Report commands actually run, failures, skips, and what remains unverified.
-5. Document public contracts (inputs, outcomes and failure semantics) and explain *why* non-obvious policy or ordering exists. Update operator docs and examples with behavior changes; record significant architectural decisions under `docs/adr/` when settled. Update [PROJECT_STATUS.md](PROJECT_STATUS.md) in the same change when progress, a blocker or the next action changes. Keep it a handoff, not a changelog or copy of the issue backlog.
+5. Document public contracts (inputs, outcomes and failure semantics) and explain *why* non-obvious policy or ordering exists. Update operator docs and examples with behavior changes; record significant architectural decisions under `docs/adr/` when settled. Record progress, blockers and next actions on the relevant issue, not in a repository file.
 
 ## Issues and triage
 

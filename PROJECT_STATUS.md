@@ -1,9 +1,0 @@
-# Project status
-
-**Progress:** #32–#40 are merged to `main` (#41). Store tests require an explicit disposable `TEST_DATABASE_URL`. Commands and reconciliation share a Server session, and background sync scheduling follows [ADR 0001](docs/adr/0001-core-owned-server-sync.md).
-
-**Known limitation:** The repository has no configured formatter or linter. Style and unused imports require diff review; TypeScript checking and Bun tests are separate gates.
-
-**Bot replies:** Every reply and log post is a styled card from `src/bot/embed-style.ts`. `FeedbackRouter` builds the sync and command cards, and `/status` and the emote preview set their own layouts. Without Embed Links, `DetailedSlashReply` turns a card into text.
-
-**Next action:** None pending.
