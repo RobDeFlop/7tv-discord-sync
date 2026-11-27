@@ -25,6 +25,7 @@ export abstract class SevenTvPort {
 
   /** Throws InvalidLinkError. */
   public abstract resolveEmoteLink(link: string): Promise<SevenTvEmote>;
+  public abstract findEmoteByExactName(name: string): Promise<SevenTvEmote | null>;
   /** Throws InvalidLinkError. */
   public abstract resolveUserLink(link: string): Promise<SevenTvUser>;
   public abstract getUser(id: SevenTvUserId): Promise<SevenTvUser | null>;

@@ -184,6 +184,42 @@ describe("access", () => {
   });
 });
 
+describe("/search", () => {
+  test("only the initiating admin can confirm the catalog preview", async () => {
+    const { discord, sevenTv, store, run, registry, interact } = setup();
+    sevenTv.addEmote({ id: "outside-set", name: "Kappa", animated: false });
+    const lookup = spyOn(sevenTv, "findEmoteByExactName");
+    const denied = new FakeRequest("search", { name: "kappa" }, S, false);
+    await registry.handle(denied);
+    expect(denied.text).toContain("Administrator");
+    expect(lookup).not.toHaveBeenCalled();
+
+    const request = await run("search", { name: "kappa" });
+    expect(request.deferred).toBe(true);
+    expect(request.replies).toHaveLength(1);
+    expect(request.preview).toMatchObject({ originalName: "Kappa", emoteUrl: "https://7tv.app/emotes/outside-set" });
+    const id = request.preview?.id;
+    if (!id) throw new Error("Expected an importable search preview");
+    const other = new FakeEmoteAddInteraction(id, { kind: "add" }, "another-admin");
+    await registry.handleEmoteAddInteraction(other);
+    expect(other.text).toContain("no longer active");
+    expect(discord.emojis(S)).toEqual([]);
+    expect(await store.listServers()).toEqual([]);
+    expect((await interact(id, { kind: "add" })).text).toContain("Added Kappa");
+    expect((await store.load(S)).requestedEmotes).toEqual([{ sevenTvEmoteId: "outside-set", requestedName: "Kappa" }]);
+    expect(discord.emojis(S).map((emoji) => emoji.name)).toEqual(["Kappa"]);
+  });
+
+  test("no match and failed lookups give distinct text replies without previews", async () => {
+    const { sevenTv, run } = setup();
+    const missing = await run("search", { name: "Po" });
+    expect(missing.replies).toEqual([expect.stringContaining("No exact emote name matched")]);
+    spyOn(sevenTv, "findEmoteByExactName").mockRejectedValueOnce(new Error("offline"));
+    const failure = await run("search", { name: "Pog" });
+    expect(failure.replies).toEqual([expect.stringContaining("Could not search 7TV")]);
+  });
+});
+
 describe("/emote add preview", () => {
   test("shows the image and original name without importing; Add uses the displayed name", async () => {
     const { discord, sevenTv, store, openPreview, interact } = setup();
@@ -760,7 +796,10 @@ describe("registration", () => {
   test("groups subcommands under /emote and /set, all admin-only", () => {
     const { registry } = setup();
     const defs = registry.definitions();
-    expect(defs.map((d) => d.name).sort()).toEqual(["config", "emote", "set", "status", "sync", "trending"]);
+    expect(defs.map((d) => d.name).sort()).toEqual(["config", "emote", "search", "set", "status", "sync", "trending"]);
+    expect(defs.find((d) => d.name === "search")).toMatchObject({
+      dm_permission: false, options: [{ name: "name", required: true }],
+    });
     const emote = defs.find((d) => d.name === "emote")!;
     expect(emote.options?.map((o) => o.name)).toEqual(["add", "remove"]);
     expect(emote.options?.find((o) => o.name === "add")?.options).toEqual([

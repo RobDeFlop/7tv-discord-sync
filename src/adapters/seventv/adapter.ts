@@ -15,7 +15,7 @@ import { SevenTvLink } from "./links.ts";
 import { SevenTvMapper, type ApiEmote, type ApiSet, type ApiUser } from "./mapping.ts";
 
 const API = "https://7tv.io/v3";
-const TRENDING_PAGE_SIZE = 100;
+const SEARCH_PAGE_SIZE = 100;
 const CATEGORY: Record<TrendingPeriod, string> = {
   day: "TRENDING_DAY",
   week: "TRENDING_WEEK",
@@ -90,37 +90,54 @@ export class SevenTvAdapter extends SevenTvPort {
   public async getTrending(period: TrendingPeriod, limit: number): Promise<SevenTvEmote[]> {
     const out: SevenTvEmote[] = [];
     for (let page = 1; out.length < limit; page++) {
-      const size = Math.min(TRENDING_PAGE_SIZE, limit - out.length);
-      const res = await this.http(`${API}/gql`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          operationName: "SearchEmotes",
-          variables: {
-            query: "",
-            limit: size,
-            page,
-            sort: { value: "popularity", order: "DESCENDING" },
-            filter: {
-              category: CATEGORY[period],
-              exact_match: false,
-              case_sensitive: false,
-              ignore_tags: false,
-              zero_width: false,
-              animated: false,
-              aspect_ratio: "",
-            },
-          },
-          query: SEARCH_QUERY,
-        }),
-      });
-      if (!res.ok) throw new Error(`7TV trending failed: HTTP ${res.status}`);
-      const body = (await res.json()) as { data?: { emotes?: { items?: ApiEmote[] } } };
+      const size = Math.min(SEARCH_PAGE_SIZE, limit - out.length);
+      const body = await this.searchPage("", CATEGORY[period], false, page, size);
       const items = body.data?.emotes?.items ?? [];
       out.push(...items.map((e) => SevenTvMapper.emote(e)));
       if (items.length < size) break;
     }
     return out.slice(0, limit);
+  }
+
+  public async findEmoteByExactName(name: string): Promise<SevenTvEmote | null> {
+    const folded = name.toLowerCase();
+    for (let page = 1; ; page++) {
+      const body = await this.searchPage(name, CATEGORY["all-time"], true, page, SEARCH_PAGE_SIZE);
+      const result = body.data?.emotes;
+      if (body.errors?.length || !Array.isArray(result?.items)) throw new Error("7TV search returned an invalid result");
+      const { items, count } = result;
+      const match = items.find((item) => item.name.toLowerCase() === folded);
+      if (match) return SevenTvMapper.emote(match);
+      if (items.length < SEARCH_PAGE_SIZE || page * SEARCH_PAGE_SIZE >= count) return null;
+    }
+  }
+
+  private async searchPage(query: string, category: string, nameOnly: boolean, page: number, limit: number) {
+    const res = await this.http(`${API}/gql`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        operationName: "SearchEmotes",
+        variables: {
+          query,
+          limit,
+          page,
+          sort: { value: "popularity", order: "DESCENDING" },
+          filter: {
+            category,
+            exact_match: nameOnly,
+            case_sensitive: false,
+            ignore_tags: nameOnly,
+            zero_width: false,
+            animated: false,
+            aspect_ratio: "",
+          },
+        },
+        query: SEARCH_QUERY,
+      }),
+    });
+    if (!res.ok) throw new Error(`7TV search failed: HTTP ${res.status}`);
+    return (await res.json()) as { errors?: unknown[]; data?: { emotes?: { count: number; items: ApiEmote[] } } };
   }
 
   public async downloadImage(id: SevenTvEmoteId): Promise<ImageResult> {

@@ -3,6 +3,8 @@ import type { SyncCore } from "../core/index.ts";
 import { ConfigLogChannelSlashCommand } from "./commands/config-log-channel-slash-command.ts";
 import { EmoteAddSlashCommand } from "./commands/emote-add-slash-command.ts";
 import { EmoteRemoveSlashCommand } from "./commands/emote-remove-slash-command.ts";
+import { SearchSlashCommand } from "./commands/search-slash-command.ts";
+import { EmoteAddPreviews } from "./emote-add-previews.ts";
 import { SetLinkSlashCommand } from "./commands/set-link-slash-command.ts";
 import { SetUnlinkSlashCommand } from "./commands/set-unlink-slash-command.ts";
 import { StatusSlashCommand } from "./commands/status-slash-command.ts";
@@ -39,12 +41,13 @@ export class SlashCommandRegistry {
   private static readonly ANNOUNCEMENT_CHANNEL = 5;
 
   private readonly commands: ReadonlyMap<string, SlashCommand>;
-  private readonly emoteAdd: EmoteAddSlashCommand;
+  private readonly previews: EmoteAddPreviews;
 
   public constructor(core: SyncCore, lock: ServerLock, events: GatewayEvents, logChannel: LogChannel) {
-    this.emoteAdd = new EmoteAddSlashCommand(core, lock);
+    this.previews = new EmoteAddPreviews(core, lock);
     const all: SlashCommand[] = [
-      this.emoteAdd,
+      new EmoteAddSlashCommand(core, lock, this.previews),
+      new SearchSlashCommand(core, lock, this.previews),
       new EmoteRemoveSlashCommand(core, lock),
       new SetLinkSlashCommand(core, lock, events),
       new SetUnlinkSlashCommand(core, lock),
@@ -63,7 +66,7 @@ export class SlashCommandRegistry {
   }
 
   public async handleEmoteAddInteraction(request: EmoteAddInteraction): Promise<void> {
-    return this.emoteAdd.handleInteraction(request);
+    return this.previews.handleInteraction(request);
   }
 
   /** Command definitions for Discord: "emote add" becomes subcommand `add` of `/emote`. Administrators only. */
