@@ -6,6 +6,9 @@ Point it at a 7TV user and their active emote set shows up as Discord emojis. Wh
 
 Sync is one-way, from 7TV to Discord. The terms used here (Source Set, Requested Emote, Reserved Slot and so on) are defined in the [glossary](GLOSSARY.md).
 
+> [!NOTE]
+> This is an independent project. It is not affiliated with, endorsed by, or sponsored by Discord Inc. or 7TV. "Discord" and "7TV" are used only to describe what the bot works with; all trademarks belong to their respective owners.
+
 ## Contents
 
 - [Features](#features)
