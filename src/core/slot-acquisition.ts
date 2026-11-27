@@ -138,7 +138,11 @@ export class SlotAcquisition {
   public static imageFailure(emote: SevenTvEmote, reason: ImageFailureReason): Problem {
     return reason === "too-large"
       ? { kind: "too-large", sevenTvEmoteId: emote.id, message: `${emote.name} is still over 256 KB after conversion and was skipped.` }
-      : { kind: "skipped", sevenTvEmoteId: emote.id, message: `${emote.name} could not be downloaded from 7TV.` };
+      : {
+        kind: "skipped", sevenTvEmoteId: emote.id,
+        message: `${emote.name} could not be downloaded from 7TV.`,
+        ...(reason === "retryable" ? { retryable: true } : {}),
+      };
   }
 
   private async plan(synced: SyncedServer, emote: SevenTvEmote, tier: ManagedTier) {

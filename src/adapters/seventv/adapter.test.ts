@@ -140,6 +140,12 @@ describe("trending", () => {
     await expect(adapter.getTrending("day", 2)).rejects.toBeInstanceOf(SevenTvSearchError);
   });
 
+  test("catalog candidates do not depend on image host metadata", async () => {
+    const invalidHost = { ...fx.animatedEmote, host: 42 };
+    const { adapter } = setup({ [`${API}/gql`]: { data: { emotes: { count: 2, items: [invalidHost, fx.staticEmote] } } } });
+    expect((await adapter.getTrending("week", 2)).map((emote) => emote.id)).toEqual([fx.EMOTE_ID, fx.STATIC_ID]);
+  });
+
   test("maps period to category and returns emotes", async () => {
     const { adapter, calls } = setup({ [`${API}/gql`]: fx.trendingResponse });
     const emotes = await adapter.getTrending("week", 2);
@@ -209,15 +215,15 @@ describe("downloadImage", () => {
     expect(await adapter.downloadImage(fx.EMOTE_ID)).toEqual({ ok: false, reason: "unavailable" });
   });
 
-  test("an invalid image host is a logged typed failure and is not fetched", async () => {
+  test("an invalid image host is logged as unavailable and is not fetched", async () => {
     const { adapter, calls } = setup({
       [`${API}/emotes/${fx.EMOTE_ID}`]: { ...fx.animatedEmote, host: { ...fx.animatedEmote.host, url: "//other.invalid/emote/x" } },
     });
     const logged = spyOn(console, "warn").mockImplementation(() => {});
     try {
-      await expect(adapter.downloadImage(fx.EMOTE_ID)).rejects.toBeInstanceOf(SevenTvRequestError);
+      expect(await adapter.downloadImage(fx.EMOTE_ID)).toEqual({ ok: false, reason: "unavailable" });
       expect(calls).toHaveLength(1);
-      expect(logged.mock.calls).toEqual([[expect.stringMatching(/seventv_image_lookup_failed operation=lookup_emote emote=\w+ error=SevenTvRequestError$/)]]);
+      expect(logged.mock.calls).toEqual([[expect.stringMatching(/seventv_image_unavailable operation=lookup_emote emote=\w+ retryable=false error=InvalidSevenTvPayloadError$/)]]);
     } finally {
       logged.mockRestore();
     }
@@ -227,8 +233,17 @@ describe("downloadImage", () => {
     const path = `${API}/emotes/${fx.EMOTE_ID}`;
     const routes: Record<string, unknown> = { [path]: 503, [`https://cdn.7tv.app/emote/${fx.EMOTE_ID}/2x.webp`]: bytes };
     const { adapter } = setup(routes);
-    await expect(adapter.downloadImage(fx.EMOTE_ID)).rejects.toMatchObject({ status: 503 });
+    expect(await adapter.downloadImage(fx.EMOTE_ID)).toEqual({ ok: false, reason: "retryable" });
     routes[path] = fx.animatedEmote;
+    await expect(adapter.downloadImage(fx.EMOTE_ID)).resolves.toMatchObject({ ok: true });
+  });
+
+  test("a CDN outage does not classify an emote as permanently unavailable", async () => {
+    const path = `https://cdn.7tv.app/emote/${fx.EMOTE_ID}/2x.webp`;
+    const routes: Record<string, unknown> = { [`${API}/emotes/${fx.EMOTE_ID}`]: fx.animatedEmote, [path]: 503 };
+    const { adapter } = setup(routes);
+    expect(await adapter.downloadImage(fx.EMOTE_ID)).toEqual({ ok: false, reason: "retryable" });
+    routes[path] = bytes;
     await expect(adapter.downloadImage(fx.EMOTE_ID)).resolves.toMatchObject({ ok: true });
   });
 

@@ -13,7 +13,7 @@ import { Logger, LogLevel } from "../../logger.ts";
 import { SevenTvPort, type ImageResult, type SevenTvChange } from "../../ports/index.ts";
 import { EventApiClient, WebSocketEventSocket, type Dispatch, type EventSocket } from "./events.ts";
 import { SevenTvLink } from "./links.ts";
-import { SevenTvMapper } from "./mapping.ts";
+import { SevenTvMapper, type ApiEmote } from "./mapping.ts";
 
 const API = "https://7tv.io/v3";
 const SEARCH_PAGE_SIZE = 100;
@@ -25,7 +25,7 @@ const CATEGORY: Record<TrendingPeriod, string> = {
 };
 
 const SEARCH_QUERY =
-  "query SearchEmotes($query: String!, $page: Int, $sort: Sort, $limit: Int, $filter: EmoteSearchFilter) { emotes(query: $query, page: $page, sort: $sort, limit: $limit, filter: $filter) { count items { id name animated host { url files { name width height frame_count size format } } } } }";
+  "query SearchEmotes($query: String!, $page: Int, $sort: Sort, $limit: Int, $filter: EmoteSearchFilter) { emotes(query: $query, page: $page, sort: $sort, limit: $limit, filter: $filter) { count items { id name animated } } }";
 
 /** Network, HTTP or payload failure; not a missing emote, set or user. */
 export class SevenTvRequestError extends Error {
@@ -35,6 +35,8 @@ export class SevenTvRequestError extends Error {
 }
 
 export class SevenTvSearchError extends SevenTvRequestError {}
+
+class InvalidSevenTvPayloadError extends SevenTvRequestError {}
 
 export interface SevenTvAdapterOptions {
   fetch?: typeof fetch;
@@ -158,29 +160,34 @@ export class SevenTvAdapter extends SevenTvPort {
   }
 
   public async downloadImage(id: SevenTvEmoteId): Promise<ImageResult> {
-    const emote = await this.getJson(`${API}/emotes/${id}`, (value) => SevenTvMapper.isEmote(value)).catch((error: unknown) => {
-      // Don't cache a metadata outage as a permanent skip in Trending Fill.
-      Logger.write(LogLevel.warn, `seventv_image_lookup_failed operation=lookup_emote emote=${Logger.field(id)} ${Logger.failure(error)}`);
-      throw error;
-    });
+    let emote: ApiEmote | null;
+    try {
+      emote = await this.getJson(`${API}/emotes/${id}`, (value) => SevenTvMapper.isEmote(value));
+    } catch (error) {
+      const retryable = !(error instanceof InvalidSevenTvPayloadError);
+      return SevenTvAdapter.imageUnavailable(id, "lookup_emote", Logger.failure(error), retryable);
+    }
     if (!emote) return SevenTvAdapter.imageUnavailable(id, "lookup_emote", "reason=not_found");
     const url = SevenTvMapper.sourceUrl(emote);
     if (!url) return SevenTvAdapter.imageUnavailable(id, "select_source", "reason=no_supported_file");
     let operation = "download_cdn";
     try {
       const res = await this.http(url, { redirect: "error" });
-      if (!res.ok) return SevenTvAdapter.imageUnavailable(id, operation, `status=${res.status}`);
+      if (!res.ok) {
+        const retryable = res.status === 408 || res.status === 429 || res.status >= 500;
+        return SevenTvAdapter.imageUnavailable(id, operation, `status=${res.status}`, retryable);
+      }
       const bytes = new Uint8Array(await res.arrayBuffer());
       operation = "prepare_image";
       return await this.imagePipeline.prepare(bytes, emote.animated ?? false);
     } catch (error) {
-      return SevenTvAdapter.imageUnavailable(id, operation, Logger.failure(error));
+      return SevenTvAdapter.imageUnavailable(id, operation, Logger.failure(error), operation === "download_cdn");
     }
   }
 
-  private static imageUnavailable(id: SevenTvEmoteId, operation: string, details: string): ImageResult {
-    Logger.write(LogLevel.warn, `seventv_image_unavailable operation=${operation} emote=${Logger.field(id)} ${details}`);
-    return { ok: false, reason: "unavailable" };
+  private static imageUnavailable(id: SevenTvEmoteId, operation: string, details: string, retryable = false): ImageResult {
+    Logger.write(LogLevel.warn, `seventv_image_unavailable operation=${operation} emote=${Logger.field(id)} retryable=${retryable} ${details}`);
+    return { ok: false, reason: retryable ? "retryable" : "unavailable" };
   }
 
   protected override onFirstListener(): void {
@@ -286,8 +293,11 @@ export class SevenTvAdapter extends SevenTvPort {
       status = res.status;
       if (status === 404 || status === 400) return null;
       if (!res.ok) throw new SevenTvRequestError("7TV request returned an HTTP error", status);
-      const json: unknown = await res.json();
-      if (!valid(json)) throw new SevenTvRequestError("7TV response has an invalid payload");
+      const json: unknown = await res.json().catch((cause: unknown) => {
+        if (cause instanceof SyntaxError) throw new InvalidSevenTvPayloadError("7TV response is not JSON", status, { cause });
+        throw cause;
+      });
+      if (!valid(json)) throw new InvalidSevenTvPayloadError("7TV response has an invalid payload");
       return json;
     } catch (cause) {
       if (cause instanceof SevenTvRequestError) throw cause;

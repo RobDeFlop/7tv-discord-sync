@@ -139,6 +139,26 @@ describe("Trending Fill and Source Set renames are no longer silent", () => {
     expect((await problems()).map((p) => p.kind)).toEqual(["skipped"]);
   });
 
+  test("Trending Fill retries a transient image problem without warning again or blocking other candidates", async () => {
+    const { sevenTv, core, emotes, names, problems } = setup();
+    emotes(["a", "b"]);
+    sevenTv.setTrending("week", ["a", "b"]);
+    const download = spyOn(sevenTv, "downloadImage");
+    const unavailable = { ok: false, reason: "retryable" } as const;
+    download.mockResolvedValueOnce(unavailable);
+    const first = await core.apply(S, new SetTrendingCommand(true));
+    expect(warnings(first)).toHaveLength(1);
+    expect(names()).toEqual(["BB"]);
+    expect(await problems()).toMatchObject([{ kind: "skipped", retryable: true }]);
+    download.mockResolvedValueOnce(unavailable);
+    expect(warnings(await core.reconcile(S))).toEqual([]);
+    download.mockRestore();
+
+    await core.reconcile(S);
+    expect(names()).toEqual(["AA", "BB"]);
+    expect(await problems()).toEqual([]);
+  });
+
   test("a suffixed trending emote produces feedback and a problem", async () => {
     const { discord, sevenTv, core, emotes, names, problems } = setup();
     emotes(["a"]);

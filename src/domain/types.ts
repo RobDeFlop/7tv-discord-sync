@@ -55,6 +55,8 @@ export interface Problem {
   kind: ProblemKind;
   message: string;
   sevenTvEmoteId?: SevenTvEmoteId;
+  /** A temporary failure to obtain an image; this does not suppress future attempts. */
+  retryable?: true;
 }
 
 export interface TrendingSettings {

@@ -33,9 +33,11 @@ export interface ApiUser {
   connections?: ApiConnection[] | null;
 }
 
+type ApiEmoteSummary = Pick<ApiEmote, "id" | "name" | "animated">;
+
 interface ApiSearchPage {
   count: number;
-  items: ApiEmote[];
+  items: ApiEmoteSummary[];
 }
 
 /** Validates the fields consumed from 7TV v3 and maps them to domain shapes. */
@@ -43,9 +45,9 @@ export class SevenTvMapper {
   public static readonly DISCORD_EMOJI_BYTES = 256 * 1024;
 
   public static isEmote(value: unknown): value is ApiEmote {
-    if (!this.isRecord(value) || !this.isId(value.id) || typeof value.name !== "string") return false;
-    if (value.animated != null && typeof value.animated !== "boolean") return false;
+    if (!this.isRecord(value)) return false;
     const { host } = value;
+    if (!this.isEmoteSummary(value)) return false;
     // The source URL is fetched, so only accept the public 7TV emote CDN path and simple filenames.
     if (host == null) return true;
     if (!this.isRecord(host) || typeof host.url !== "string") return false;
@@ -79,8 +81,14 @@ export class SevenTvMapper {
       (!Array.isArray(value.errors) || value.errors.length > 0))) return null;
     if (!this.isRecord(value.data) || !this.isRecord(value.data.emotes)) return null;
     const { count, items } = value.data.emotes;
-    if (!this.isNonNegativeInteger(count) || !Array.isArray(items) || !items.every((item: unknown) => this.isEmote(item))) return null;
+    if (!this.isNonNegativeInteger(count) || !Array.isArray(items) ||
+      !items.every((item: unknown) => this.isEmoteSummary(item))) return null;
     return { count, items };
+  }
+
+  private static isEmoteSummary(value: unknown): value is ApiEmoteSummary {
+    return this.isRecord(value) && this.isId(value.id) && typeof value.name === "string" &&
+      (value.animated == null || typeof value.animated === "boolean");
   }
 
   private static isFile(file: unknown): file is ApiFile {
@@ -100,7 +108,7 @@ export class SevenTvMapper {
     return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
   }
 
-  public static emote(e: ApiEmote, name = e.name): SevenTvEmote {
+  public static emote(e: ApiEmoteSummary, name = e.name): SevenTvEmote {
     return { id: e.id, name, animated: e.animated === true };
   }
 

@@ -177,6 +177,8 @@ export class SyncScheduler {
         // A Command can start while this batch waits for capacity. Release the permit rather than
         // holding it while waiting; other Servers and Commands make progress independently.
         const running = this.lock.tryRun(server, async () => {
+          // Removal can cancel this batch after reserving the lock but before the callback starts.
+          if (this.lanes.get(server) !== lane) return;
           if (lane.retry === batch) lane.retry = undefined;
           if (lane.pending === batch) lane.pending = undefined;
           lane.active = batch;

@@ -170,7 +170,7 @@ test("failed 7TV polls report the operation and continue polling watched objects
     t.sets.set(fx.SET_ID, { ...fx.emoteSet, emotes: [] });
     await t.adapter.pollOnce();
     expect(warn.mock.calls).toEqual([[expect.stringMatching(
-      new RegExp(`seventv_poll_failed operation=get_user object=${fx.USER_ID} error=SevenTvRequestError$`),
+      new RegExp(`seventv_poll_failed operation=get_user object=${fx.USER_ID} error=InvalidSevenTvPayloadError$`),
     )]]);
     expect(t.changes).toEqual([{ type: "set-changed", setId: fx.SET_ID }]);
     t.users.set(fx.USER_ID, fx.userWithoutSet);

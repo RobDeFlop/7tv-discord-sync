@@ -12,7 +12,7 @@ import type {
 export type ImageResult =
   | { ok: true; image: EmojiImage }
   | { ok: false; reason: "too-large"; previewImage: EmojiImage }
-  | { ok: false; reason: "unavailable" };
+  | { ok: false; reason: "unavailable" | "retryable" };
 
 export type SevenTvChange =
   | { type: "set-changed"; setId: SevenTvSetId }
@@ -35,6 +35,7 @@ export abstract class SevenTvPort {
    * Download the emote ready for Discord. The adapter runs the image pipeline,
    * so a result is either ready to upload or a failure. An oversized emote
    * includes a preview image that must not be used as a replacement upload.
+   * A retryable failure is not a verdict on the image and may succeed in a later run.
    */
   public abstract downloadImage(id: SevenTvEmoteId): Promise<ImageResult>;
 

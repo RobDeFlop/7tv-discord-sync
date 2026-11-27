@@ -30,7 +30,10 @@ describe.skipIf(!url)("PostgresStore (needs TEST_DATABASE_URL)", () => {
     linkedUserId: "u1",
     trending: { enabled: true, period: "month" },
     logChannelId: "c1",
-    problems: [{ kind: "too-large", message: "big", sevenTvEmoteId: "e3" }],
+    problems: [
+      { kind: "too-large", message: "big", sevenTvEmoteId: "e3" },
+      { kind: "skipped", message: "image unavailable", sevenTvEmoteId: "e4", retryable: true },
+    ],
   };
 
   const snapshotOf = async (server: string) => (await store.load(server)).toSnapshot();

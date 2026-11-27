@@ -19,7 +19,7 @@ export class ProblemLedger {
   /** Record what was seen, returning true only when it warrants new feedback. */
   public observe(problem: Problem): boolean {
     const existing = this.entries.find((entry) => ProblemLedger.sameSubject(entry, problem));
-    if (existing?.message === problem.message) {
+    if (existing?.message === problem.message && existing.retryable === problem.retryable) {
       this.observed.add(existing);
     } else {
       const entry = { ...problem };
@@ -41,7 +41,8 @@ export class ProblemLedger {
 
   /** Trending Fill does not redownload an image still listed with a known failure. */
   public observeKnownImageFailure(emoteId: SevenTvEmoteId): boolean {
-    const known = this.entries.filter((entry) => entry.sevenTvEmoteId === emoteId && ProblemLedger.isImageFailure(entry));
+    const known = this.entries.filter((entry) =>
+      entry.sevenTvEmoteId === emoteId && !entry.retryable && ProblemLedger.isImageFailure(entry));
     for (const entry of known) this.observed.add(entry);
     return known.length > 0;
   }

@@ -2,7 +2,31 @@ import { expect, jest, test } from "bun:test";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
 import { RateLimitError } from "../ports/index.ts";
 import { SyncCore, type SyncUpdate } from "./index.ts";
-import { MAX_CONCURRENT_RECONCILES } from "./sync-scheduler.ts";
+import type { ServerId } from "../domain/index.ts";
+import { ServerLock } from "./server-lock.ts";
+import { MAX_CONCURRENT_RECONCILES, SyncScheduler } from "./sync-scheduler.ts";
+
+class ReservingLock extends ServerLock {
+  public afterReserve?: () => void;
+
+  public override tryRun<T>(server: ServerId, task: () => Promise<T>): Promise<T> | undefined {
+    const reserved = super.tryRun(server, task);
+    if (reserved) this.afterReserve?.();
+    return reserved;
+  }
+}
+
+test("cancellation between reserving the Server lock and starting an attempt skips Discord work", async () => {
+  const lock = new ReservingLock();
+  let attempts = 0;
+  const scheduler = new SyncScheduler(lock, async () => { attempts++; }, () => {});
+  lock.afterReserve = () => scheduler.cancel("left");
+  const updates: SyncUpdate[] = [];
+  await scheduler.request("left", async (_server, update) => { updates.push(update); });
+  await scheduler.idle();
+  expect(updates.map(({ kind }) => kind)).toEqual(["cancelled"]);
+  expect(attempts).toBe(0);
+});
 
 test("coalesced result delivery is bounded separately from reconciliation", async () => {
   const discord = new FakeDiscord();
