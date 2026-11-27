@@ -8,13 +8,13 @@ Push a new `v`-prefixed SemVer tag on the reviewed commit when ready to release.
 
 | Git tag | GHCR image tags |
 | --- | --- |
-| `v1.2.0` | `1.2.0`, `latest` |
-| `v1.3.0-beta.1` | `1.3.0-beta.1` only |
+| `v1.0.0` | `1.0.0`, `latest` |
+| `v1.1.0-beta.1` | `1.1.0-beta.1` only |
 
 `latest` tracks stable publications, not prereleases. Use a new version per release; don't move existing Git tags. Docker tags have a 128-character limit and don't support SemVer build metadata (`+...`). Invalid release refs are not published. To preview the policy locally (no tag creation, login or upload):
 
 ```sh
-bash .github/scripts/release-tags.sh refs/tags/v1.3.0-beta.1
+bash .github/scripts/release-tags.sh refs/tags/v1.1.0-beta.1
 ```
 
 ## One-time GHCR package setup
@@ -27,12 +27,12 @@ The public [GHCR package page](https://github.com/users/RobDeFlop/packages/conta
 
 ## Verify anonymous access
 
-On a clean Linux Docker host without a GHCR login or credential helper, pull the exact released version. For example, after `v1.2.0`:
+On a clean Linux Docker host without a GHCR login or credential helper, pull the exact released version. For example, after `v1.0.0`:
 
 ```sh
 config=$(mktemp -d)
-docker --config "$config" pull --platform linux/amd64 ghcr.io/robdeflop/7tv-discord-sync:1.2.0
+docker --config "$config" pull --platform linux/amd64 ghcr.io/robdeflop/7tv-discord-sync:1.0.0
 rmdir "$config"
 ```
 
-A successful pull reports the image digest and requires neither source access nor `docker login`. While signed out of GitHub, check that the package page displays the copy instructions. To read the same instructions directly for a particular pulled version, use `docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.description"}}' ghcr.io/robdeflop/7tv-discord-sync:1.2.0`. If denied, check **package** visibility and the exact image name and tag; do not change repository visibility.
+A successful pull reports the image digest and requires neither source access nor `docker login`. While signed out of GitHub, check that the package page displays the copy instructions. To read the same instructions directly for a particular pulled version, use `docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.description"}}' ghcr.io/robdeflop/7tv-discord-sync:1.0.0`. If denied, check **package** visibility and the exact image name and tag; do not change repository visibility.
