@@ -57,7 +57,7 @@ jobs:
       - name: Migrate a fresh database and convert emote images with the runtime image
         run: |
           docker run --rm --network container:${{ job.services.postgres.id }} \
-            -e DATABASE_URL=postgres://postgres:test-only@localhost:5432/postgres \
+            -e TEST_DATABASE_URL=postgres://postgres:test-only@localhost:5432/postgres \
             --mount "type=bind,src=$PWD/src/adapters/store/postgres-store.test.ts,dst=/app/src/adapters/store/postgres-store.test.ts,readonly" \
             --mount "type=bind,src=$PWD/src/image/pipeline.test.ts,dst=/app/src/image/pipeline.test.ts,readonly" \
             bot:test bun test --timeout 30000 ./src/adapters/store/postgres-store.test.ts ./src/image/pipeline.test.ts
@@ -67,7 +67,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun test --timeout 30000
         env:
-          DATABASE_URL: postgres://postgres:test-only@localhost:${{ job.services.postgres.ports[5432] }}/postgres
+          TEST_DATABASE_URL: postgres://postgres:test-only@localhost:${{ job.services.postgres.ports[5432] }}/postgres
       - name: Save the tested image for publication
         if: github.event_name == 'push'
         run: docker save -o "$RUNNER_TEMP/bot.tar" bot:test

@@ -151,12 +151,16 @@ docker compose up -d --wait postgres
 
 Set `DATABASE_URL=postgres://sync:sync_local@127.0.0.1:5433/7tv_sync` in `.env` to run the bot with Bun on your host. The example credentials are for local development only, and the port is published only on loopback. Git ignores the local `compose.yaml` so you can customize it.
 
-To test the Postgres adapter without starting the bot or setting a Discord token (Bash):
+Run `docker compose stop postgres` to stop the development database without deleting its data.
+
+The store tests ignore `DATABASE_URL`. They migrate the database and delete test rows, so run them against a separate disposable instance (Bash):
 
 ```sh
-DATABASE_URL=postgres://sync:sync_local@127.0.0.1:5433/7tv_sync bun test src/adapters/store/postgres-store.test.ts
+docker run --rm -d --name 7tv-sync-test-db -e POSTGRES_PASSWORD=test-only -p 127.0.0.1:55432:5432 postgres:18
+# Wait until pg_isready reports that PostgreSQL is accepting connections over TCP.
+docker exec 7tv-sync-test-db pg_isready -h 127.0.0.1 -U postgres
+TEST_DATABASE_URL=postgres://postgres:test-only@127.0.0.1:55432/postgres bun test --timeout 30000
+docker stop 7tv-sync-test-db
 ```
-
-Run `docker compose stop postgres` to stop the database without deleting its data.
 
 Coding standards are in `docs/agents/coding-standards.md`. In conditions, use booleans directly or negate them with `!` rather than comparing them to `true` or `false`. Check for `null` explicitly when it represents a distinct unknown state.
