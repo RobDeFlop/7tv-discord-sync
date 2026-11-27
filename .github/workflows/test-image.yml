@@ -1,0 +1,42 @@
+name: Test bot image
+
+on: pull_request
+
+permissions:
+  contents: read
+
+jobs:
+  test-image:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: test-only
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build Linux/AMD64 image locally
+        run: docker build --platform linux/amd64 -t bot:test .
+      - name: Migrate a fresh database and convert emote images with the runtime image
+        run: |
+          docker run --rm --network container:${{ job.services.postgres.id }} \
+            -e DATABASE_URL=postgres://postgres:test-only@localhost:5432/postgres \
+            --mount "type=bind,src=$PWD/src/adapters/store/postgres-store.test.ts,dst=/app/src/adapters/store/postgres-store.test.ts,readonly" \
+            --mount "type=bind,src=$PWD/src/image/pipeline.test.ts,dst=/app/src/image/pipeline.test.ts,readonly" \
+            bot:test bun test --timeout 30000 ./src/adapters/store/postgres-store.test.ts ./src/image/pipeline.test.ts
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - run: bun install --frozen-lockfile
+      - run: bun test --timeout 30000
+        env:
+          DATABASE_URL: postgres://postgres:test-only@localhost:${{ job.services.postgres.ports[5432] }}/postgres
