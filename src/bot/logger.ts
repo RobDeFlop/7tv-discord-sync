@@ -1,33 +1,32 @@
 enum LogLevel {
-  Debug = "debug",
-  Info = "info",
-  Warn = "warn",
-  Error = "error",
+  debug,
+  info,
+  warn,
+  error,
 }
-
-const levels = Object.values(LogLevel); // Lowest to highest severity.
 
 /** Strings in the message position are display text. Pass caught values separately. */
 export class Logger {
   public static debug(message: string | object, ...data: unknown[]): void {
-    Logger.write(LogLevel.Debug, message, data);
+    Logger.write("debug", message, data);
   }
 
   public static info(message: string | object, ...data: unknown[]): void {
-    Logger.write(LogLevel.Info, message, data);
+    Logger.write("info", message, data);
   }
 
   public static warn(message: string | object, ...data: unknown[]): void {
-    Logger.write(LogLevel.Warn, message, data);
+    Logger.write("warn", message, data);
   }
 
   public static error(message: string | object, ...data: unknown[]): void {
-    Logger.write(LogLevel.Error, message, data);
+    Logger.write("error", message, data);
   }
 
-  private static write(level: LogLevel, message: string | object, data: unknown[]): void {
-    const minimum = levels.find((candidate) => candidate === process.env.LOG_LEVEL) ?? LogLevel.Info;
-    if (levels.indexOf(level) < levels.indexOf(minimum)) return;
+  private static write(level: keyof typeof LogLevel, message: string | object, data: unknown[]): void {
+    const configured = process.env.LOG_LEVEL;
+    const minimum = configured === "debug" || configured === "warn" || configured === "error" ? configured : "info";
+    if (LogLevel[level] < LogLevel[minimum]) return;
 
     const parts = typeof message === "string" ? [message] : [];
     // REST errors may carry tokens in messages, URLs, bodies and nested causes.
