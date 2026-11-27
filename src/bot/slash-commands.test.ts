@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import type { APIEmbed } from "discord.js";
 import { SyncCore } from "../core/index.ts";
 import type { ServerId } from "../domain/index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore, MAX_EMOJI_BYTES } from "../testing/fakes.ts";
@@ -55,6 +56,14 @@ class FakeRequest extends SlashRequest {
 
   public get text(): string {
     return this.replyHistory.filter((reply) => typeof reply === "string").join("\n");
+  }
+
+  public get embed(): APIEmbed {
+    const [reply] = this.replies;
+    if (!reply || typeof reply === "string" || "originalName" in reply || this.replyHistory.length !== 1) {
+      throw new Error("Expected one embed reply");
+    }
+    return reply;
   }
 }
 
@@ -581,7 +590,7 @@ describe("commands translate to core calls", () => {
         run("status"), run("sync"), run("set link", { link: "https://7tv.app/users/u1" }),
       ]);
       const replies = await Promise.race([requests, Bun.sleep(150).then(() => null)]);
-      expect(replies?.[0]?.text).toContain("1 write pending");
+      expect(replies?.[0]?.embed.fields).toContainEqual({ name: "Write queue", value: "1 write pending" });
       expect(replies?.[1]?.replies).toEqual([{
         title: "Sync queued",
         description: "Check `/status` for pending writes or the configured log channel for results.",
@@ -625,7 +634,9 @@ describe("commands translate to core calls", () => {
     await run("sync");
     await events.idle();
     expect(log.sent).toEqual([]);
-    expect((await run("status")).text).toContain("Problems:\n- Big could not be downloaded from 7TV.");
+    const { embed } = await run("status");
+    expect(embed.title).toBe("Action needed");
+    expect(embed.fields).toContainEqual({ name: "Problems", value: "- Big could not be downloaded from 7TV." });
   });
 
   test("/config log-channel stores the channel and confirms with text", async () => {
@@ -634,18 +645,85 @@ describe("commands translate to core calls", () => {
     expect(req.replies).toEqual(["Log channel updated."]);
     expect((await core.status(S)).logChannelId).toBe("chan-9");
   });
+});
 
-  test("/status shows slots, link, trending, problems and write-queue progress", async () => {
-    const { discord, run, events } = setup();
-    discord.setQueueProgress(S, { pending: 4, retryingAt: Date.now() + 30_000 });
+describe("/status", () => {
+  test("leads with no action needed and shows unset or idle settings", async () => {
+    const { run } = setup();
+    const request = await run("status");
+    expect(request.deferred).toBe(true);
+    expect(request.embed.title).toBe("No action needed");
+    expect(request.embed.fields).toContainEqual({
+      name: "Settings",
+      value: "Linked 7TV user: Not linked\nTrending Fill: Off (week)\nLog channel: Not set",
+    });
+    expect(request.embed.fields).toContainEqual({ name: "Write queue", value: "Idle" });
+    expect(request.embed.fields?.some((field) => field.name === "Problems")).toBe(false);
+  });
+
+  test("names the missing permission and tells the admin what to do", async () => {
+    const { discord, run } = setup();
+    discord.revokeManageExpressions(S);
+    const { embed } = await run("status");
+    expect(embed.title).toBe("Action needed");
+    expect(embed.description).toContain("Missing **Manage Expressions**");
+    expect(embed.description).toContain("`/sync`");
+  });
+
+  test("separates slot usage by quota and tier, and shows configured settings and retry time", async () => {
+    const { discord, sevenTv, run, events, interact } = setup();
+    discord.seedEmoji(S, { name: "hand", animated: false });
+    sevenTv.addEmote({ id: "requested", name: "Requested", animated: true });
+    sevenTv.addEmote({ id: "trending", name: "Trending", animated: false });
+    sevenTv.setTrending("month", ["trending"]);
+    const { preview } = await run("emote add", { link: "https://7tv.app/emotes/requested" });
+    if (preview?.id === undefined) throw new Error("Expected an importable emote preview");
+    await interact(preview.id, { kind: "add" });
+    await run("trending", { state: "on", period: "month" });
     await run("set link", { link: "https://7tv.app/users/u1" });
     await events.idle();
-    const text = (await run("status")).text;
-    expect(text).toContain("Static: 1/50");
-    expect(text).toContain("Animated: 0/50");
-    expect(text).toContain("u1");
-    expect(text).toMatch(/4 writes? pending/);
-    expect(text).toMatch(/rate limited.*\ds/i);
+    await run("config log-channel", { channel: "1234" });
+    discord.setQueueProgress(S, { pending: 4, retryingAt: 2_000_000_030_500 });
+
+    const { embed } = await run("status");
+    expect(embed.title).toBe("No action needed");
+    expect(embed.fields?.map((field) => [field.name, field.value])).toEqual([
+      ["Static Slots", "3/50 used\nReserved Slots: 1\nRequested Emotes: 0\nSource Set: 1\nTrending Fill: 1"],
+      ["Animated Slots", "1/50 used\nReserved Slots: 0\nRequested Emotes: 1\nSource Set: 0\nTrending Fill: 0"],
+      ["Settings", "Linked 7TV user: u1\nTrending Fill: On (month)\nLog channel: <#1234>"],
+      ["Write queue", "4 writes pending. Rate limited by Discord; retrying <t:2000000030:R>."],
+    ]);
+  });
+
+  test("shows a rename notice without asking the admin to intervene", async () => {
+    const { discord, run, events } = setup();
+    discord.seedEmoji(S, { name: "Pog", animated: false });
+    await run("set link", { link: "https://7tv.app/users/u1" });
+    await events.idle();
+    const { embed } = await run("status");
+    expect(embed.title).toBe("No action needed");
+    expect(embed.fields?.find((field) => field.name === "Problems")?.value).toContain("Pog");
+  });
+
+  test("fits long problem lists and says how many entries were omitted", async () => {
+    const { store, run } = setup();
+    const state = await store.load(S);
+    const problemCount = 80;
+    for (let i = 0; i < problemCount; i++) {
+      state.addProblem({ kind: "too-large", message: `Problem ${i + 1}: ${"x".repeat(i === 0 ? 1500 : 50)}` });
+    }
+    await store.save(S, state);
+
+    const { embed } = await run("status");
+    expect(embed.title).toBe("Action needed");
+    const value = embed.fields?.find((field) => field.name === "Problems")?.value ?? "";
+    expect(value.length).toBeLessThanOrEqual(1024);
+    const entries = value.split("\n");
+    const summary = entries.pop();
+    expect(entries[0]).toMatch(/^- Problem 1: .+…$/);
+    expect(entries[1]).toStartWith("- Problem 2:");
+    expect(entries.length).toBeLessThan(problemCount);
+    expect(summary).toBe(`${problemCount - entries.length} more omitted.`);
   });
 });
 
