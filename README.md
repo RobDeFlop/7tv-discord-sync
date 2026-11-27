@@ -47,7 +47,7 @@ If the bot is already installed with an older invite, open the configured log ch
 
 ### 4. Set up a database
 
-Any Postgres database works. Create an empty database, for example `7tv_sync`, and note its connection string. The bot creates its tables itself on startup.
+Create an empty Postgres database, for example `7tv_sync`, or use the [local Postgres example](#local-postgres). Note its connection string. The bot creates its tables on startup.
 
 ### 5. Configure
 
@@ -128,5 +128,23 @@ bun run db:generate # regenerate migrations after a schema change (needs DATABAS
 ```
 
 With Docker Compose available, `bash scripts/test-compose.sh` checks both operator install paths using a local image and disposable databases. It does not require a Discord token or a published image.
+
+### Local Postgres
+
+To run only the database in Docker, copy [`compose.example.yaml`](compose.example.yaml) to `compose.yaml` in the repo root if you don't already have one, then start it:
+
+```sh
+docker compose up -d --wait postgres
+```
+
+Set `DATABASE_URL=postgres://sync:sync_local@127.0.0.1:5433/7tv_sync` in `.env` to run the bot with Bun on your host. The example credentials are for local development only, and the port is published only on loopback. Git ignores the local `compose.yaml` so you can customize it.
+
+To test the Postgres adapter without starting the bot or setting a Discord token (Bash):
+
+```sh
+DATABASE_URL=postgres://sync:sync_local@127.0.0.1:5433/7tv_sync bun test src/adapters/store/postgres-store.test.ts
+```
+
+Run `docker compose stop postgres` to stop the database without deleting its data.
 
 Coding standards are in `docs/agents/coding-standards.md`. In conditions, use booleans directly or negate them with `!` rather than comparing them to `true` or `false`. Check for `null` explicitly when it represents a distinct unknown state.
