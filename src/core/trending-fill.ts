@@ -1,8 +1,7 @@
-import { ServerQuotas, type SyncResult } from "../domain/index.ts";
-import { ImageFailure } from "./image-failure.ts";
-import { NameCollision } from "./name-collision.ts";
+import type { SevenTvPort } from "../ports/index.ts";
 import { ReconcileStep } from "./reconcile-step.ts";
-import { SyncReport } from "./sync-report.ts";
+import type { SlotAcquisition } from "./slot-acquisition.ts";
+import type { SyncReport } from "./sync-report.ts";
 import type { SyncedServer } from "./synced-server.ts";
 
 /**
@@ -14,14 +13,16 @@ export class TrendingFill extends ReconcileStep {
   /** How many trending emotes to ask 7TV for; enough to cover both quotas at the highest boost level. */
   private static readonly CANDIDATES = 150;
 
-  public async run(synced: SyncedServer): Promise<SyncResult> {
-    const report = new SyncReport();
+  public constructor(private readonly sevenTv: SevenTvPort, private readonly allocator: SlotAcquisition) {
+    super();
+  }
+
+  public override async run(synced: SyncedServer, report: SyncReport): Promise<void> {
     if (!synced.state.trending.enabled) {
       await this.removeAll(synced, report);
     } else {
       await this.fill(synced, report);
     }
-    return report.toResult();
   }
 
   private async removeAll(synced: SyncedServer, report: SyncReport): Promise<void> {
@@ -32,23 +33,11 @@ export class TrendingFill extends ReconcileStep {
 
   private async fill(synced: SyncedServer, report: SyncReport): Promise<void> {
     const { state } = synced;
-    const trending = await this.context.sevenTv.getTrending(state.trending.period, TrendingFill.CANDIDATES);
+    const trending = await this.sevenTv.getTrending(state.trending.period, TrendingFill.CANDIDATES);
     for (const emote of trending) {
       if (state.findManaged(emote.id)) continue;
-      if (ImageFailure.confirmKnown(state, emote.id)) continue;
-      const quota = ServerQuotas.quotaOf(emote.animated);
-      const plan = await this.context.allocator.plan(synced, quota, "trending");
-      if (!plan.ok || plan.displace) continue; // only genuinely free slots
-      const image = await this.context.sevenTv.downloadImage(emote.id);
-      if (!image.ok) {
-        new ImageFailure(emote, image.reason).recordOnce(state, report);
-        continue;
-      }
-      const placed = await this.context.allocator.place(synced, report, plan, emote, image.image, "trending", emote.name);
-      if (placed.suffixed) {
-        const collision = NameCollision.onAdd(emote.name, placed.name, emote.id);
-        if (collision.record(state)) report.say("warning", collision.text);
-      }
+      const outcome = await this.allocator.acquire(synced, report, { emote, tier: "trending" });
+      if (outcome.kind === "failed") throw outcome.error;
     }
   }
 }

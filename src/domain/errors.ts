@@ -10,19 +10,16 @@ export type LinkKind = "emote" | "user";
 
 /** A link cannot be resolved. Thrown by ports, shown to the admin by the core. */
 export class InvalidLinkError extends DomainError {
-  public constructor(
-    public readonly link: string,
-    private readonly expected?: LinkKind,
-  ) {
-    super(`Not a valid 7TV link: ${link}`);
+  public constructor(private readonly expected: LinkKind) {
+    super(`Not a valid 7TV ${expected} link`);
   }
 
   public toFeedback(): FeedbackMessage {
-    if (!this.expected) return { level: "error", text: `"${this.link}" is not a valid 7TV link.` };
     const example = this.expected === "emote" ? "emotes" : "users";
     return {
       level: "error",
-      text: `"${this.link}" is not a valid 7TV ${this.expected} link. Use a link like https://7tv.app/${example}/<id>.`,
+      // A rejected link may contain credentials and can end up in log-channel fallback.
+      text: `That is not a valid 7TV ${this.expected} link. Use a link like https://7tv.app/${example}/<id>.`,
     };
   }
 }
@@ -80,6 +77,17 @@ export class EmoteAddPromotionUnavailableError extends DomainError {
 
   public toFeedback(): FeedbackMessage {
     return { level: "error", text: this.message, reason: "emote-promotion-unavailable" };
+  }
+}
+
+/** The current Slot would require displacing a different Managed Emote than the admin saw. */
+export class EmoteAddSlotChangedError extends DomainError {
+  public constructor() {
+    super("Which Managed Emote would be displaced has changed. No emote was added.");
+  }
+
+  public toFeedback(): FeedbackMessage {
+    return { level: "error", text: this.message, reason: "emote-slot-changed" };
   }
 }
 

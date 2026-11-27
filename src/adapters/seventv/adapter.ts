@@ -9,10 +9,11 @@ import {
   type TrendingPeriod,
 } from "../../domain/index.ts";
 import type { ImagePipeline } from "../../image/pipeline.ts";
+import { Logger, LogLevel } from "../../logger.ts";
 import { SevenTvPort, type ImageResult, type SevenTvChange } from "../../ports/index.ts";
 import { EventApiClient, WebSocketEventSocket, type Dispatch, type EventSocket } from "./events.ts";
 import { SevenTvLink } from "./links.ts";
-import { SevenTvMapper, type ApiEmote, type ApiSet, type ApiUser } from "./mapping.ts";
+import { SevenTvMapper, type ApiEmote } from "./mapping.ts";
 
 const API = "https://7tv.io/v3";
 const SEARCH_PAGE_SIZE = 100;
@@ -24,9 +25,18 @@ const CATEGORY: Record<TrendingPeriod, string> = {
 };
 
 const SEARCH_QUERY =
-  "query SearchEmotes($query: String!, $page: Int, $sort: Sort, $limit: Int, $filter: EmoteSearchFilter) { emotes(query: $query, page: $page, sort: $sort, limit: $limit, filter: $filter) { count items { id name animated host { url files { name width height frame_count size format } } } } }";
+  "query SearchEmotes($query: String!, $page: Int, $sort: Sort, $limit: Int, $filter: EmoteSearchFilter) { emotes(query: $query, page: $page, sort: $sort, limit: $limit, filter: $filter) { count items { id name animated } } }";
 
-export class SevenTvSearchError extends Error {}
+/** Network, HTTP or payload failure; not a missing emote, set or user. */
+export class SevenTvRequestError extends Error {
+  public constructor(message: string, public readonly status?: number, options?: ErrorOptions) {
+    super(message, options);
+  }
+}
+
+export class SevenTvSearchError extends SevenTvRequestError {}
+
+class InvalidSevenTvPayloadError extends SevenTvRequestError {}
 
 export interface SevenTvAdapterOptions {
   fetch?: typeof fetch;
@@ -59,22 +69,22 @@ export class SevenTvAdapter extends SevenTvPort {
 
   public async resolveEmoteLink(link: string): Promise<SevenTvEmote> {
     const parsed = SevenTvLink.parse(link);
-    if (!parsed || !parsed.canBe("emote")) throw new InvalidLinkError(link, "emote");
-    const emote = await this.getJson<ApiEmote>(`${API}/emotes/${parsed.id}`);
-    if (!emote) throw new InvalidLinkError(link, "emote");
+    if (!parsed || !parsed.canBe("emote")) throw new InvalidLinkError("emote");
+    const emote = await this.getJson(`${API}/emotes/${parsed.id}`, (value) => SevenTvMapper.isEmote(value));
+    if (!emote) throw new InvalidLinkError("emote");
     return SevenTvMapper.emote(emote);
   }
 
   public async resolveUserLink(link: string): Promise<SevenTvUser> {
     const parsed = SevenTvLink.parse(link);
-    if (!parsed || !parsed.canBe("user")) throw new InvalidLinkError(link, "user");
+    if (!parsed || !parsed.canBe("user")) throw new InvalidLinkError("user");
     const user = await this.getUser(parsed.id);
-    if (!user) throw new InvalidLinkError(link, "user");
+    if (!user) throw new InvalidLinkError("user");
     return user;
   }
 
   public async getUser(id: SevenTvUserId): Promise<SevenTvUser | null> {
-    const raw = await this.getJson<ApiUser>(`${API}/users/${id}`);
+    const raw = await this.getJson(`${API}/users/${id}`, (value) => SevenTvMapper.isUser(value));
     if (!raw) return null;
     const user = SevenTvMapper.user(raw);
     this.watchUser(user);
@@ -82,7 +92,7 @@ export class SevenTvAdapter extends SevenTvPort {
   }
 
   public async getSet(id: SevenTvSetId): Promise<SevenTvEmoteSet | null> {
-    const raw = await this.getJson<ApiSet>(`${API}/emote-sets/${id}`);
+    const raw = await this.getJson(`${API}/emote-sets/${id}`, (value) => SevenTvMapper.isSet(value));
     if (!raw) return null;
     const set = SevenTvMapper.set(raw);
     this.watchSet(set);
@@ -93,8 +103,7 @@ export class SevenTvAdapter extends SevenTvPort {
     const out: SevenTvEmote[] = [];
     for (let page = 1; out.length < limit; page++) {
       const size = Math.min(SEARCH_PAGE_SIZE, limit - out.length);
-      const body = await this.searchPage("", CATEGORY[period], false, page, size);
-      const items = body.data?.emotes?.items ?? [];
+      const { items } = await this.searchPage("", CATEGORY[period], false, page, size);
       out.push(...items.map((e) => SevenTvMapper.emote(e)));
       if (items.length < size) break;
     }
@@ -103,10 +112,7 @@ export class SevenTvAdapter extends SevenTvPort {
 
   public async findEmoteByExactName(name: string): Promise<SevenTvEmote | null> {
     for (let page = 1; ; page++) {
-      const body = await this.searchPage(name, CATEGORY["all-time"], true, page, SEARCH_PAGE_SIZE);
-      const result = body.data?.emotes;
-      if (body.errors?.length || !Array.isArray(result?.items)) throw new SevenTvSearchError("7TV search returned an invalid result");
-      const { items, count } = result;
+      const { items, count } = await this.searchPage(name, CATEGORY["all-time"], true, page, SEARCH_PAGE_SIZE);
       const match = items.find((item) => this.matchesExactName(item.name, name));
       if (match) return SevenTvMapper.emote(match);
       if (items.length < SEARCH_PAGE_SIZE || page * SEARCH_PAGE_SIZE >= count) return null;
@@ -114,7 +120,7 @@ export class SevenTvAdapter extends SevenTvPort {
   }
 
   private async searchPage(query: string, category: string, nameOnly: boolean, page: number, limit: number) {
-    const res = await this.http(`${API}/gql`, {
+    const request: RequestInit = {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -136,24 +142,52 @@ export class SevenTvAdapter extends SevenTvPort {
         },
         query: SEARCH_QUERY,
       }),
-    });
-    if (!res.ok) throw new SevenTvSearchError(`7TV search failed: HTTP ${res.status}`);
-    return (await res.json()) as { errors?: unknown[]; data?: { emotes?: { count: number; items: ApiEmote[] } } };
+    };
+    let status: number | undefined;
+    try {
+      const res = await this.http(`${API}/gql`, request);
+      status = res.status;
+      if (!res.ok) throw new SevenTvSearchError("7TV search returned an HTTP error", status);
+      const json: unknown = await res.json();
+      const result = SevenTvMapper.searchPage(json);
+      if (!result) throw new SevenTvSearchError("7TV search returned an invalid result");
+      return result;
+    } catch (cause) {
+      const error = cause instanceof SevenTvSearchError ? cause : new SevenTvSearchError("7TV search failed", status, { cause });
+      Logger.write(LogLevel.warn, `seventv_search_failed operation=${nameOnly ? "exact_name" : "trending"} page=${page} ${Logger.failure(error)}`);
+      throw error;
+    }
   }
 
   public async downloadImage(id: SevenTvEmoteId): Promise<ImageResult> {
-    const emote = await this.getJson<ApiEmote>(`${API}/emotes/${id}`);
-    if (!emote) return { ok: false, reason: "unavailable" };
-    const url = SevenTvMapper.sourceUrl(emote);
-    if (!url) return { ok: false, reason: "unavailable" };
-    let res: Response;
+    let emote: ApiEmote | null;
     try {
-      res = await this.http(url);
-    } catch {
-      return { ok: false, reason: "unavailable" };
+      emote = await this.getJson(`${API}/emotes/${id}`, (value) => SevenTvMapper.isEmote(value));
+    } catch (error) {
+      const retryable = !(error instanceof InvalidSevenTvPayloadError);
+      return SevenTvAdapter.imageUnavailable(id, "lookup_emote", Logger.failure(error), retryable);
     }
-    if (!res.ok) return { ok: false, reason: "unavailable" };
-    return this.imagePipeline.prepare(new Uint8Array(await res.arrayBuffer()), emote.animated === true);
+    if (!emote) return SevenTvAdapter.imageUnavailable(id, "lookup_emote", "reason=not_found");
+    const url = SevenTvMapper.sourceUrl(emote);
+    if (!url) return SevenTvAdapter.imageUnavailable(id, "select_source", "reason=no_supported_file");
+    let operation = "download_cdn";
+    try {
+      const res = await this.http(url, { redirect: "error" });
+      if (!res.ok) {
+        const retryable = res.status === 408 || res.status === 429 || res.status >= 500;
+        return SevenTvAdapter.imageUnavailable(id, operation, `status=${res.status}`, retryable);
+      }
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      operation = "prepare_image";
+      return await this.imagePipeline.prepare(bytes, emote.animated ?? false);
+    } catch (error) {
+      return SevenTvAdapter.imageUnavailable(id, operation, Logger.failure(error), operation === "download_cdn");
+    }
+  }
+
+  private static imageUnavailable(id: SevenTvEmoteId, operation: string, details: string, retryable = false): ImageResult {
+    Logger.write(LogLevel.warn, `seventv_image_unavailable operation=${operation} emote=${Logger.field(id)} retryable=${retryable} ${details}`);
+    return { ok: false, reason: retryable ? "retryable" : "unavailable" };
   }
 
   protected override onFirstListener(): void {
@@ -167,7 +201,7 @@ export class SevenTvAdapter extends SevenTvPort {
   /** One polling round: re-fetch watched sets/users and emit what changed. Also run by the timer. */
   public async pollOnce(): Promise<void> {
     for (const [id, before] of [...this.watchedUsers]) {
-      const raw = await this.getJson<ApiUser>(`${API}/users/${id}`).catch(() => null);
+      const raw = await this.pollJson("get_user", id, `${API}/users/${id}`, (value) => SevenTvMapper.isUser(value));
       if (!raw) continue;
       const user = SevenTvMapper.user(raw);
       if (before === undefined) this.watchedUsers.set(id, user.activeSetId);
@@ -177,7 +211,7 @@ export class SevenTvAdapter extends SevenTvPort {
       }
     }
     for (const [id, before] of [...this.watchedSets]) {
-      const raw = await this.getJson<ApiSet>(`${API}/emote-sets/${id}`).catch(() => null);
+      const raw = await this.pollJson("get_set", id, `${API}/emote-sets/${id}`, (value) => SevenTvMapper.isSet(value));
       if (!raw) continue;
       const sig = SevenTvAdapter.signature(SevenTvMapper.set(raw));
       if (before === "") this.watchedSets.set(id, sig);
@@ -185,6 +219,18 @@ export class SevenTvAdapter extends SevenTvPort {
         this.watchedSets.set(id, sig);
         this.emit({ type: "set-changed", setId: id });
       }
+    }
+  }
+
+  private async pollJson<T>(operation: string, id: string, url: string, valid: (payload: unknown) => payload is T): Promise<T | null> {
+    const fields = `operation=${operation} object=${Logger.field(id)}`;
+    try {
+      const result = await this.getJson(url, valid);
+      if (!result) Logger.write(LogLevel.warn, `seventv_poll_failed ${fields} reason=not_found`);
+      return result;
+    } catch (error) {
+      Logger.write(LogLevel.warn, `seventv_poll_failed ${fields} ${Logger.failure(error)}`);
+      return null;
     }
   }
 
@@ -208,8 +254,12 @@ export class SevenTvAdapter extends SevenTvPort {
     }
     const interval = this.opts.pollIntervalMs ?? 5 * 60_000;
     if (interval > 0) {
-      this.pollTimer = setInterval(() => void this.pollOnce().catch(() => {}), interval);
-      (this.pollTimer as { unref?: () => void }).unref?.();
+      this.pollTimer = setInterval(() => {
+        void this.pollOnce().catch((error: unknown) =>
+          Logger.write(LogLevel.error, `seventv_poll_failed operation=poll_round ${Logger.failure(error)}`),
+        );
+      }, interval);
+      this.pollTimer.unref();
     }
   }
 
@@ -228,7 +278,7 @@ export class SevenTvAdapter extends SevenTvPort {
       this.emit({ type: "set-changed", setId: d.objectId });
     } else {
       if (!this.watchedUsers.has(d.objectId)) return;
-      const keys = d.changedKeys ?? [];
+      const keys = d.changedKeys;
       if (keys.length > 0 && !keys.includes("connections")) return;
       this.watchedUsers.set(d.objectId, undefined);
       this.emit({ type: "active-set-switched", userId: d.objectId });
@@ -236,11 +286,23 @@ export class SevenTvAdapter extends SevenTvPort {
   }
 
   /** GET JSON; 400/404 mean "no such thing" and give null, anything else non-OK throws. */
-  private async getJson<T>(url: string): Promise<T | null> {
-    const res = await this.http(url);
-    if (res.status === 404 || res.status === 400) return null;
-    if (!res.ok) throw new Error(`7TV request failed: HTTP ${res.status} ${url}`);
-    return (await res.json()) as T;
+  private async getJson<T>(url: string, valid: (payload: unknown) => payload is T): Promise<T | null> {
+    let status: number | undefined;
+    try {
+      const res = await this.http(url);
+      status = res.status;
+      if (status === 404 || status === 400) return null;
+      if (!res.ok) throw new SevenTvRequestError("7TV request returned an HTTP error", status);
+      const json: unknown = await res.json().catch((cause: unknown) => {
+        if (cause instanceof SyntaxError) throw new InvalidSevenTvPayloadError("7TV response is not JSON", status, { cause });
+        throw cause;
+      });
+      if (!valid(json)) throw new InvalidSevenTvPayloadError("7TV response has an invalid payload");
+      return json;
+    } catch (cause) {
+      if (cause instanceof SevenTvRequestError) throw cause;
+      throw new SevenTvRequestError("7TV request failed", status, { cause });
+    }
   }
 
   private static signature(set: SevenTvEmoteSet): string {

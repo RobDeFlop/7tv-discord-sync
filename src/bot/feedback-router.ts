@@ -1,7 +1,8 @@
 import type { APIEmbed } from "discord.js";
+import type { SyncCore, SyncObserver, SyncUpdate } from "../core/index.ts";
 import type { FeedbackMessage, ServerId, SyncResult } from "../domain/index.ts";
-import type { StorePort } from "../ports/index.ts";
 import { Logger, LogLevel } from "./logger.ts";
+import type { SlashRequest } from "./slash-request.ts";
 
 /** Where background sync feedback is posted. */
 export abstract class LogChannel {
@@ -14,9 +15,14 @@ export abstract class LogChannel {
 export class FeedbackRouter {
   private static readonly MAX_EMBED_DESCRIPTION = 4096;
   private static readonly MAX_TOTAL_EMBED_TEXT = 6000;
+  private static readonly MAX_PRIVATE_TEXT = 2000;
+  private static readonly MAX_PRIVATE_LINE = 350;
+  // Discord interaction tokens expire after 15 minutes; leave a margin for request latency.
+  private static readonly REPLY_WINDOW_MS = 14 * 60_000 + 55_000;
+  private readonly delivered = new WeakMap<SyncUpdate, Promise<void>>();
 
   public constructor(
-    private readonly store: StorePort,
+    private readonly core: Pick<SyncCore, "logChannelId">,
     private readonly logChannel: LogChannel,
   ) {}
 
@@ -26,27 +32,100 @@ export class FeedbackRouter {
     return feedback.map((f) => FeedbackRouter.line(f)).join("\n");
   }
 
-  /**
-   * Background sync feedback goes to the Server's log channel if one is set. Problems are
-   * recorded in the Server's state by the core either way, so without a channel they show in /status.
-   */
-  public async deliver(server: ServerId, result: SyncResult): Promise<void> {
-    if (result.feedback.length === 0) return;
-    try {
-      const channelId = (await this.store.load(server)).logChannelId;
-      if (!channelId) return;
-      await this.logChannel.send(channelId, FeedbackRouter.embeds(result.feedback));
-    } catch (err) {
-      // Discord errors can contain interaction tokens. Only include numeric diagnostics.
-      const details = [`Could not deliver feedback for ${server}:`];
-      if (err !== null && typeof err === "object") {
-        for (const key of ["status", "code"]) {
-          const value = Object.getOwnPropertyDescriptor(err, key)?.value;
-          if (Number.isSafeInteger(value)) details.push(`${key}=${value}`);
+  /** Deliver every shared update to the log channel at most once if one or more replies need fallback. */
+  public deliverUpdate(server: ServerId, update: SyncUpdate, privateFallback = false): Promise<void> {
+    if (update.kind === "cancelled") return Promise.resolve();
+    const existing = this.delivered.get(update);
+    if (existing) return existing;
+    const result = { ...update.result, feedback: FeedbackRouter.updateFeedback(update, privateFallback) };
+    if (!result.feedback.length) return Promise.resolve();
+    const delivery = this.deliver(server, result);
+    this.delivered.set(update, delivery);
+    return delivery;
+  }
+
+  /** Give one invocation a private result while its interaction is editable; otherwise route the shared update. */
+  public privateReply(request: SlashRequest): SyncObserver {
+    let recipient: SlashRequest | undefined = request;
+    const deadline = request.createdAt + FeedbackRouter.REPLY_WINDOW_MS;
+    const timer = setTimeout(() => { recipient = undefined; }, Math.max(0, deadline - Date.now()));
+    timer.unref();
+    const release = (): void => {
+      recipient = undefined;
+      clearTimeout(timer);
+    };
+    return async (server, update, setting) => {
+      if (recipient && Date.now() < deadline) {
+        try {
+          const feedback = FeedbackRouter.updateFeedback(update, true);
+          await recipient.editOriginal(FeedbackRouter.privateText([
+            ...feedback.slice(0, 2), ...(setting ?? []), ...feedback.slice(2),
+          ]));
+          return;
+        } catch (error) {
+          Logger.write(LogLevel.error, `sync_reply_edit_failed operation=edit_original server=${Logger.field(server)} ${Logger.failure(error)}`);
+        } finally {
+          if (update.kind !== "paused") release();
         }
       }
-      Logger.write(LogLevel.error, details.join(" "));
+      release();
+      await this.deliverUpdate(server, update, true);
+      // The shared result is posted once, but settings can differ between two invocations.
+      if (update.kind === "finished" && setting?.length) {
+        await this.deliver(server, { changes: [], feedback: [...setting] });
+      }
+    };
+  }
+
+  /** Feedback goes to the configured log channel if any; status is available regardless. */
+  public async deliver(server: ServerId, result: SyncResult): Promise<void> {
+    if (result.feedback.length === 0) return;
+    let operation = "load_log_channel";
+    try {
+      const channelId = await this.core.logChannelId(server);
+      if (!channelId) return;
+      operation = "send_log_embed";
+      await this.logChannel.send(channelId, FeedbackRouter.embeds(result.feedback));
+    } catch (error) {
+      Logger.write(LogLevel.error, `feedback_delivery_failed operation=${operation} server=${Logger.field(server)} ${Logger.failure(error)}`);
     }
+  }
+
+  private static updateFeedback(update: SyncUpdate, includeEmpty: boolean): FeedbackMessage[] {
+    const { changes, feedback } = update.result;
+    const failed = feedback.some((message) => message.level === "error");
+    if (update.kind === "cancelled" || (!changes.length && (!includeEmpty || failed))) return feedback;
+    const summary = update.kind === "paused" ? `${changes.length} emoji changes before the pause.`
+      : failed ? `Sync ended after ${changes.length} emoji changes.`
+      : `Sync complete: ${changes.length} emoji changes.`;
+    const details = changes.slice(0, 10).map((change): FeedbackMessage => {
+      const text = change.type === "created" ? `Added ${change.name}.`
+        : change.type === "deleted" ? `Removed ${change.name}.`
+        : change.type === "reserved" ? `Kept ${change.name} as a Reserved Slot.`
+        : `Renamed ${change.from} to ${change.to}.`;
+      return { level: "info", text };
+    });
+    return [{ level: "info", text: summary }, ...feedback, ...details];
+  }
+
+  private static privateText(feedback: readonly FeedbackMessage[]): string {
+    if (!feedback.length) return "Done.";
+    const lines = feedback.map((message) => FeedbackRouter.line(message));
+    const full = lines.join("\n");
+    if (full.length <= FeedbackRouter.MAX_PRIVATE_TEXT) return full;
+
+    const footer = "\nSome details were omitted. Check /status for recorded problems.";
+    const budget = FeedbackRouter.MAX_PRIVATE_TEXT - footer.length;
+    let text = "";
+    for (const line of lines) {
+      const detail = line.length > FeedbackRouter.MAX_PRIVATE_LINE
+        ? `${line.slice(0, FeedbackRouter.MAX_PRIVATE_LINE - 1).toWellFormed()}…`
+        : line;
+      const next = text ? `${text}\n${detail}` : detail;
+      if (next.length > budget) break;
+      text = next;
+    }
+    return text + footer;
   }
 
   private static embeds(feedback: ReadonlyArray<FeedbackMessage>): APIEmbed[] {

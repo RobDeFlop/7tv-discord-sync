@@ -55,6 +55,8 @@ export interface Problem {
   kind: ProblemKind;
   message: string;
   sevenTvEmoteId?: SevenTvEmoteId;
+  /** A temporary failure to obtain an image; this does not suppress future attempts. */
+  retryable?: true;
 }
 
 export interface TrendingSettings {
@@ -93,7 +95,7 @@ export type EmoteAddNameConflictReason = "emote-name-taken" | "emote-name-change
 export interface FeedbackMessage {
   level: "info" | "warning" | "error";
   text: string;
-  reason?: EmoteAddNameConflictReason | "emote-promotion-unavailable";
+  reason?: EmoteAddNameConflictReason | "emote-promotion-unavailable" | "emote-slot-changed";
 }
 
 /** What a sync did to a Server's emojis. */
@@ -125,6 +127,8 @@ export interface ServerStatus {
   /** False when the bot lacks Manage Expressions and so cannot change emojis. */
   manageExpressions: boolean;
   writeQueue: WriteQueueProgress;
+  /** Most recent background sync summary since the bot started, if any. */
+  lastSync?: { changeCount: number; retryAt?: number; feedback: FeedbackMessage[] };
   quotas: Record<Quota, TierUsage>;
   problems: Problem[];
   logChannelId: string | null;

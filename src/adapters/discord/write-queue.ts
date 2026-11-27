@@ -24,11 +24,8 @@ export interface QueueProgress {
   retryingAt: number | null;
 }
 
-interface Job {
-  task: () => Promise<unknown>;
-  resolve: (v: unknown) => void;
-  reject: (e: unknown) => void;
-}
+// The callback settles the caller's typed result once the untyped queue has removed the job.
+type Job = (lane: Lane) => Promise<() => void>;
 
 interface Lane {
   jobs: Job[];
@@ -55,7 +52,14 @@ export class WriteQueue {
     }
     const l = lane;
     const promise = new Promise<T>((resolve, reject) => {
-      l.jobs.push({ task, resolve: resolve as (v: unknown) => void, reject });
+      l.jobs.push(async (lane) => {
+        try {
+          const result = await this.attempt(lane, task);
+          return () => resolve(result);
+        } catch (error) {
+          return () => reject(error);
+        }
+      });
     });
     if (!l.running) void this.drain(l);
     return promise;
@@ -68,22 +72,18 @@ export class WriteQueue {
 
   private async drain(lane: Lane): Promise<void> {
     lane.running = true;
-    while (lane.jobs.length > 0) {
-      const job = lane.jobs[0]!;
-      try {
-        job.resolve(await this.attempt(lane, job));
-      } catch (e) {
-        job.reject(e);
-      }
+    for (let job = lane.jobs[0]; job; job = lane.jobs[0]) {
+      const settle = await job(lane);
       lane.jobs.shift();
+      settle();
     }
     lane.running = false;
   }
 
-  private async attempt(lane: Lane, job: Job): Promise<unknown> {
+  private async attempt<T>(lane: Lane, task: () => Promise<T>): Promise<T> {
     for (let n = 1; ; n++) {
       try {
-        return await job.task();
+        return await task();
       } catch (e) {
         if (!(e instanceof RateLimitError) || n >= this.maxAttempts) throw e;
         lane.retryingAt = this.clock.now() + e.retryAfterMs;

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { GatewayIntentBits, RateLimitError as RestRateLimitError, type Guild } from "discord.js";
 import { DiscordJsAdapter, DiscordJsGuild } from "./discordjs.ts";
 import { RateLimitError } from "./write-queue.ts";
@@ -11,7 +11,7 @@ const created = { id: "1", name: "pog", animated: false };
 
 describe("DiscordJsGuild.downloadEmojiImage", () => {
   const client = DiscordJsAdapter.createClient();
-  const guild = { client } as Guild;
+  const guild = { client, id: "server" } as Guild;
 
   test.each([false, true])("downloads the existing emoji in the matching format (animated: %s)", async (animated) => {
     const urls: string[] = [];
@@ -27,7 +27,13 @@ describe("DiscordJsGuild.downloadEmojiImage", () => {
 
   test("returns no image when the CDN can't serve it", async () => {
     const http = async () => new Response(null, { status: 404 });
-    expect(await new DiscordJsGuild(guild, http).downloadEmojiImage(created)).toBeNull();
+    const logged = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(await new DiscordJsGuild(guild, http).downloadEmojiImage(created)).toBeNull();
+      expect(logged.mock.calls).toEqual([[expect.stringMatching(/discord_image_unavailable operation=download_cdn server=server emoji=1 status=404$/)]]);
+    } finally {
+      logged.mockRestore();
+    }
   });
 });
 
@@ -107,6 +113,14 @@ describe("DiscordJsGuild rate limits", () => {
     expect(await guild.renameEmoji("1", "x").catch((e) => e)).toBeInstanceOf(RateLimitError);
     expect(await guild.deleteEmoji("1").catch((e) => e)).toBeInstanceOf(RateLimitError);
   });
+
+  test.each([[0.5, 500], ["0.5", 1000], [-1, 1000], [Infinity, 1000]])(
+    "narrows a 429's Retry-After value %p before scheduling (%p ms)", async (retryAfter, retryAfterMs) => {
+      const cause = { status: 429, retryAfter };
+      const guild = guildWith({ delete: async () => { throw cause; } });
+      await expect(guild.deleteEmoji("1")).rejects.toMatchObject({ retryAfterMs, cause });
+    },
+  );
 
   test("other errors pass through", async () => {
     const boom = new Error("boom");

@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { AddEmoteCommand, LinkSourceSetCommand, SetTrendingCommand, SyncCore } from "./index.ts";
+import { SetTrendingCommand, SyncCore } from "./index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
+import { addRequestedEmote } from "../testing/requested-emotes.ts";
 
 const S = "server-1";
-const link = (id: string) => `https://7tv.app/emotes/${id}`;
 
 function setup(boostLevel: number) {
   const discord = new FakeDiscord();
@@ -36,7 +36,7 @@ describe("boost level drops", () => {
     sevenTv.setEmotes("setA", "A", source);
     const trending = emotes("trd", 40);
     sevenTv.setTrending("week", trending);
-    await core.apply(S, new LinkSourceSetCommand(`https://7tv.app/users/u1`));
+    await core.linkSourceSet(S, `https://7tv.app/users/u1`);
     await core.apply(S, new SetTrendingCommand(true));
     expect(discord.emojis(S)).toHaveLength(100);
 
@@ -57,10 +57,10 @@ describe("boost level drops", () => {
   test("Requested Emotes go only when nothing of lower Precedence is left; Reserved Slots never", async () => {
     const { discord, sevenTv, core, emotes, named, hand } = setup(1);
     hand(30);
-    for (const id of emotes("req", 30)) await core.apply(S, new AddEmoteCommand(link(id)));
+    for (const id of emotes("req", 30)) await addRequestedEmote(core, S, id);
     const source = emotes("src", 40);
     sevenTv.setEmotes("setA", "A", source);
-    await core.apply(S, new LinkSourceSetCommand(`https://7tv.app/users/u1`));
+    await core.linkSourceSet(S, `https://7tv.app/users/u1`);
     expect(discord.emojis(S)).toHaveLength(100);
 
     discord.setBoostLevel(S, 0); // 50 static: 30 reserved + 20 left for 30 requested + 40 source
@@ -78,7 +78,7 @@ describe("boost level rises", () => {
     hand(30);
     sevenTv.setEmotes("setA", "A", emotes("src", 40));
     sevenTv.setTrending("week", emotes("trd", 100));
-    await core.apply(S, new LinkSourceSetCommand(`https://7tv.app/users/u1`));
+    await core.linkSourceSet(S, `https://7tv.app/users/u1`);
     await core.apply(S, new SetTrendingCommand(true));
     expect(named("src")).toBe(20);
     expect((await core.status(S)).problems.filter((p) => p.kind === "pending")).toHaveLength(20);
@@ -97,7 +97,7 @@ describe("catch-up reconcile", () => {
     const { discord, sevenTv, core, emotes, named } = setup(0);
     const ids = emotes("src", 10);
     sevenTv.setEmotes("setA", "A", ids.slice(0, 5));
-    await core.apply(S, new LinkSourceSetCommand(`https://7tv.app/users/u1`));
+    await core.linkSourceSet(S, `https://7tv.app/users/u1`);
     expect(named("src")).toBe(5);
 
     // while the bot was down:
@@ -125,7 +125,7 @@ describe("missing Manage Expressions", () => {
   test("reconcile reports it as feedback instead of crashing", async () => {
     const { discord, sevenTv, core, emotes } = setup(0);
     sevenTv.setEmotes("setA", "A", emotes("src", 3));
-    await core.apply(S, new LinkSourceSetCommand(`https://7tv.app/users/u1`));
+    await core.linkSourceSet(S, `https://7tv.app/users/u1`);
     discord.revokeManageExpressions(S);
     sevenTv.setEmotes("setA", "A", emotes("src", 5));
     const r = await core.reconcile(S);
@@ -137,7 +137,7 @@ describe("missing Manage Expressions", () => {
     const { discord, sevenTv, core } = setup(0);
     sevenTv.addEmote({ id: "e1", name: "Pog", animated: false });
     discord.revokeManageExpressions(S);
-    const r = await core.apply(S, new AddEmoteCommand(link("e1")));
+    const r = await addRequestedEmote(core, S, "e1");
     expect(r.feedback.some((f) => f.level === "error" && /Manage Expressions/.test(f.text))).toBe(true);
   });
 });

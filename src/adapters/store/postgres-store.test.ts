@@ -2,16 +2,17 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ServerState, type ServerStateSnapshot } from "../../domain/index.ts";
 import { PostgresStore } from "./postgres-store.ts";
 
-const url = process.env.DATABASE_URL;
+const url = process.env.TEST_DATABASE_URL;
 
-describe.skipIf(!url)("PostgresStore (needs DATABASE_URL)", () => {
+describe.skipIf(!url)("PostgresStore (needs TEST_DATABASE_URL)", () => {
   let store: PostgresStore;
   const a = "test-server-a";
   const b = "test-server-b";
   const empty = ServerState.empty().toSnapshot();
 
   beforeAll(async () => {
-    store = new PostgresStore(url!);
+    if (!url) throw new Error("TEST_DATABASE_URL must point to a disposable database");
+    store = new PostgresStore(url);
     await store.migrate();
     await store.remove(a);
     await store.remove(b);
@@ -29,7 +30,10 @@ describe.skipIf(!url)("PostgresStore (needs DATABASE_URL)", () => {
     linkedUserId: "u1",
     trending: { enabled: true, period: "month" },
     logChannelId: "c1",
-    problems: [{ kind: "too-large", message: "big", sevenTvEmoteId: "e3" }],
+    problems: [
+      { kind: "too-large", message: "big", sevenTvEmoteId: "e3" },
+      { kind: "skipped", message: "image unavailable", sevenTvEmoteId: "e4", retryable: true },
+    ],
   };
 
   const snapshotOf = async (server: string) => (await store.load(server)).toSnapshot();

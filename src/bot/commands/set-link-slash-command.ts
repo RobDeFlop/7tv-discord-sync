@@ -1,3 +1,4 @@
+import type { SyncObserver } from "../../core/index.ts";
 import type { ServerId } from "../../domain/index.ts";
 import { BackgroundSyncCommand } from "../background-sync-command.ts";
 import type { SlashOption } from "../slash-command.ts";
@@ -11,9 +12,7 @@ export class SetLinkSlashCommand extends BackgroundSyncCommand {
     { name: "link", description: "7TV user link", type: "string", required: true },
   ];
 
-  protected async run(server: ServerId, request: SlashRequest): Promise<string> {
-    const command = await this.core.prepareSourceLink(this.requiredString(request, "link"));
-    this.queue(server, command);
-    return "Sync queued. Check /status for progress or the configured log channel for the result.";
+  protected override async schedule(server: ServerId, request: SlashRequest, observer: SyncObserver): Promise<void> {
+    await this.core.linkSourceSet(server, this.requiredString(request, "link"), observer);
   }
 }

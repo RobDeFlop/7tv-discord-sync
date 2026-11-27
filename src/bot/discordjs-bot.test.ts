@@ -1,13 +1,17 @@
-import { expect, mock, test } from "bun:test";
+import { expect, mock, spyOn, test } from "bun:test";
 import {
+  ApplicationCommandType,
+  ChannelType,
+  ChatInputCommandInteraction,
+  Client,
+  DiscordAPIError,
+  InteractionType,
+  Locale,
   MessageFlags,
   PermissionFlagsBits,
   PermissionsBitField,
   type APIEmbed,
-  type ChatInputCommandInteraction,
-  type Client,
   type InteractionEditReplyOptions,
-  type MessageCreateOptions,
 } from "discord.js";
 import { SyncCore } from "../core/index.ts";
 import { FakeServers } from "../testing/bot-fakes.ts";
@@ -15,8 +19,71 @@ import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
 import { DiscordBot, DiscordJsSlashRequest } from "./discordjs-bot.ts";
 import { FeedbackRouter } from "./feedback-router.ts";
 import { GatewayEvents } from "./gateway-events.ts";
-import { ServerLock } from "./server-lock.ts";
 import { SlashCommandRegistry } from "./slash-command-registry.ts";
+
+class GatewayCommandInteraction extends ChatInputCommandInteraction {
+  public constructor(client: Client<true>) {
+    super(client, {
+      id: "100", application_id: "101", guild_id: "123", type: InteractionType.ApplicationCommand,
+      channel_id: "104", channel: { id: "104", type: ChannelType.GuildText },
+      token: "fixture", version: 1, locale: Locale.EnglishUS, app_permissions: "0",
+      entitlements: [], authorizing_integration_owners: {}, attachment_size_limit: 1024,
+      member: {
+        user: { id: "102", username: "admin", discriminator: "0", avatar: null, global_name: null },
+        permissions: "8", roles: [], flags: 0, deaf: false, mute: false, joined_at: "2020-01-01T00:00:00Z",
+      },
+      data: { id: "103", name: "sync", type: ApplicationCommandType.ChatInput },
+    });
+  }
+}
+
+function gatewayFixture() {
+  const client = new Client<true>({ intents: [] });
+  const store = new FakeStore();
+  const core = new SyncCore(new FakeSevenTv(), new FakeDiscord(), store);
+  const log = DiscordBot.logChannel(client);
+  const feedback = new FeedbackRouter(core, log);
+  const events = new GatewayEvents(core, feedback, new FakeServers());
+  const registry = new SlashCommandRegistry(core, feedback, log);
+  spyOn(client, "login").mockResolvedValue("unused");
+  return { bot: new DiscordBot(client, events, registry), client, events, registry };
+}
+
+test("interaction failures log the SDK error class without logging the interaction token", async () => {
+  const { bot, client, registry } = gatewayFixture();
+  const token = "sensitive-test-interaction-token";
+  const error = new DiscordAPIError({ message: `Unknown interaction ${token}`, code: 10062 }, 10062, 404,
+    "POST", `https://discord.com/api/v10/interactions/123/${token}/callback`, { body: { token }, files: undefined });
+  spyOn(registry, "handle").mockRejectedValueOnce(error);
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await bot.start("unused");
+    client.emit("interactionCreate", new GatewayCommandInteraction(client));
+    await Bun.sleep(0);
+    expect(logged.mock.calls).toEqual([[expect.stringMatching(
+      / ERROR interaction_failed operation=handle_interaction server=123 error=DiscordAPIError status=404 code=10062$/,
+    )]]);
+    expect(logged.mock.calls[0]?.[0]).not.toContain(token);
+  } finally {
+    logged.mockRestore();
+    await bot.stop();
+  }
+});
+
+test("startup failure identifies the failed operation", async () => {
+  const { bot, client, events } = gatewayFixture();
+  spyOn(events, "catchUp").mockRejectedValueOnce(new Error("private startup data"));
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await bot.start("unused");
+    client.emit("clientReady", client);
+    await Bun.sleep(0);
+    expect(logged.mock.calls).toEqual([[expect.stringMatching(/ ERROR startup_failed operation=catch_up_servers error=Error$/)]]);
+  } finally {
+    logged.mockRestore();
+    await bot.stop();
+  }
+});
 
 test("DiscordJsSlashRequest sends the queue confirmation as an ephemeral deferred embed", async () => {
   const interaction = {
@@ -24,6 +91,7 @@ test("DiscordJsSlashRequest sends the queue confirmation as an ephemeral deferre
     deferred: false,
     deferReply: mock(async () => {}),
     editReply: mock(async () => {}),
+    followUp: mock(async () => {}),
   };
   const request = new DiscordJsSlashRequest(interaction as unknown as ChatInputCommandInteraction);
   const embed = { title: "Sync queued" };
@@ -32,6 +100,11 @@ test("DiscordJsSlashRequest sends the queue confirmation as an ephemeral deferre
   await request.reply(embed);
   expect(interaction.deferReply).toHaveBeenCalledWith({ flags: MessageFlags.Ephemeral });
   expect(interaction.editReply).toHaveBeenCalledWith({ embeds: [embed] });
+  await request.editOriginal("Sync complete: 1 emoji changes.");
+  expect(interaction.editReply).toHaveBeenLastCalledWith({
+    content: "Sync complete: 1 emoji changes.", embeds: [], components: [], allowedMentions: { parse: [] },
+  });
+  expect(interaction.followUp).not.toHaveBeenCalled();
 });
 
 test("/search defers privately and renders the matched catalog emote with confirmation controls", async () => {
@@ -41,10 +114,8 @@ test("/search defers privately and renders the matched catalog emote with confir
   sevenTv.addEmote({ id: "e1", name: "Kappa", animated: false });
   const store = new FakeStore();
   const core = new SyncCore(sevenTv, discord, store);
-  const lock = new ServerLock();
   const log = DiscordBot.logChannel({} as Client);
-  const events = new GatewayEvents(core, store, new FeedbackRouter(store, log), lock, new FakeServers());
-  const registry = new SlashCommandRegistry(core, lock, events, log);
+  const registry = new SlashCommandRegistry(core, new FeedbackRouter(core, log), log);
   const interaction = {
     commandName: "search",
     options: { getSubcommand: () => null, get: () => ({ value: "kappa" }) },
@@ -97,10 +168,10 @@ class LogChannelStatusFixture {
     const discord = new FakeDiscord();
     discord.addServer(this.serverId);
     const core = new SyncCore(new FakeSevenTv(), discord, this.store);
-    const lock = new ServerLock();
     const logChannel = DiscordBot.logChannel({ channels: { fetch: this.fetchChannel } } as unknown as Client);
-    this.events = new GatewayEvents(core, this.store, new FeedbackRouter(this.store, logChannel), lock, new FakeServers());
-    this.registry = new SlashCommandRegistry(core, lock, this.events, logChannel);
+    const feedback = new FeedbackRouter(core, logChannel);
+    this.events = new GatewayEvents(core, feedback, new FakeServers());
+    this.registry = new SlashCommandRegistry(core, feedback, logChannel);
   }
 
   public async seed(channelId: string | null): Promise<void> {
@@ -112,6 +183,7 @@ class LogChannelStatusFixture {
   public async run(commandName: string, hasEmbedLinks = true): Promise<InteractionEditReplyOptions> {
     const interaction = {
       commandName,
+      createdTimestamp: Date.now(),
       appPermissions: new PermissionsBitField(hasEmbedLinks ? PermissionFlagsBits.EmbedLinks : 0n),
       deferred: false,
       guildId: this.serverId,
@@ -165,10 +237,6 @@ class LogChannelStatusFixture {
     expect(this.permissionsFor).toHaveBeenLastCalledWith(this.botMember);
   }
 
-  public expectPublicPost(options: MessageCreateOptions): void {
-    expect(this.send).toHaveBeenCalledWith(options);
-  }
-
   public expectNoPublicPost(): void {
     expect(this.send).not.toHaveBeenCalled();
   }
@@ -194,10 +262,7 @@ test("private /status warns when the log channel denies Embed Links and clears w
   fixture.expectNoPublicPost();
 
   await fixture.syncAndWait();
-  fixture.expectPublicPost({
-    embeds: [{ title: "Sync results", description: "Sync complete: 0 emoji changes." }],
-    allowedMentions: { parse: [] },
-  });
+  fixture.expectNoPublicPost();
 });
 
 test.each(["a failed log channel lookup", "unavailable channel permissions"] as const)(
@@ -242,6 +307,6 @@ test("without Embed Links in the invoking channel, status and queued sync detail
   const sync = await fixture.run("sync", false);
   expect(sync.embeds).toBeUndefined();
   expect(sync.content).toStartWith("Sync queued");
-  expect(sync.content).toContain("Check `/status`");
+  expect(sync.content).toContain("private reply");
   fixture.expectNoPublicPost();
 });

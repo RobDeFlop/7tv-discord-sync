@@ -1,13 +1,12 @@
-import { SetTrendingCommand, type SyncCore } from "../../core/index.ts";
+import { SetTrendingCommand, type SyncObserver } from "../../core/index.ts";
 import type { ServerId, TrendingPeriod } from "../../domain/index.ts";
-import { RateLimitError } from "../../ports/discord-port.ts";
-import type { GatewayEvents } from "../gateway-events.ts";
-import type { ServerLock } from "../server-lock.ts";
-import { SlashCommand, type SlashOption } from "../slash-command.ts";
+import { BackgroundSyncCommand } from "../background-sync-command.ts";
+import type { SlashOption } from "../slash-command.ts";
 import type { SlashRequest } from "../slash-request.ts";
 
 /** /trending <on|off> [period] */
-export class TrendingSlashCommand extends SlashCommand {
+export class TrendingSlashCommand extends BackgroundSyncCommand {
+  private static readonly PERIODS = ["day", "week", "month", "all-time"] as const satisfies readonly TrendingPeriod[];
   public readonly path = "trending";
   public readonly description = "Fill free slots with trending 7TV emotes";
   public override readonly options: ReadonlyArray<SlashOption> = [
@@ -16,22 +15,27 @@ export class TrendingSlashCommand extends SlashCommand {
       name: "period",
       description: "Trending period (default: week)",
       type: "string",
-      choices: ["day", "week", "month", "all-time"],
+      choices: TrendingSlashCommand.PERIODS,
     },
   ];
 
-  public constructor(core: SyncCore, lock: ServerLock, private readonly events: GatewayEvents) {
-    super(core, lock);
+  protected override async schedule(server: ServerId, request: SlashRequest, observer: SyncObserver): Promise<void> {
+    const state = request.option("state");
+    const period = request.option("period");
+    if (state !== "on" && state !== "off") {
+      await TrendingSlashCommand.reject(server, observer, "Choose on or off for Trending Fill.");
+    } else if (period !== undefined && !TrendingSlashCommand.isPeriod(period)) {
+      await TrendingSlashCommand.reject(server, observer, "Invalid Trending Fill period. Choose day, week, month, or all-time.");
+    } else {
+      await this.core.apply(server, new SetTrendingCommand(state === "on", period), observer);
+    }
   }
 
-  protected async run(server: ServerId, request: SlashRequest): Promise<string> {
-    const enabled = this.requiredString(request, "state") === "on";
-    const period = (request.stringOption("period") ?? undefined) as TrendingPeriod | undefined;
-    try {
-      return await this.apply(server, new SetTrendingCommand(enabled, period));
-    } catch (error) {
-      if (!(error instanceof RateLimitError)) throw error;
-      return this.events.resumeAfterRateLimit(server, error);
-    }
+  private static isPeriod(value: unknown): value is TrendingPeriod {
+    return TrendingSlashCommand.PERIODS.some((period) => period === value);
+  }
+
+  private static reject(server: ServerId, observer: SyncObserver, text: string): Promise<void> {
+    return observer(server, { kind: "finished", result: { changes: [], feedback: [{ level: "error", text }] } });
   }
 }

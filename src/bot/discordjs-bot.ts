@@ -37,18 +37,16 @@ export class DiscordJsSlashRequest extends SlashRequest {
     return this.interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
   }
 
+  public get createdAt(): number {
+    return this.interaction.createdTimestamp;
+  }
+
   public get userId(): string {
     return this.interaction.user.id;
   }
 
-  public stringOption(name: string): string | null {
-    const value = this.interaction.options.get(name)?.value;
-    return typeof value === "string" ? value : null;
-  }
-
-  public booleanOption(name: string): boolean | null {
-    const value = this.interaction.options.get(name)?.value;
-    return typeof value === "boolean" ? value : null;
+  public option(name: string): unknown {
+    return this.interaction.options.get(name)?.value;
   }
 
   public async defer(): Promise<void> {
@@ -66,6 +64,13 @@ export class DiscordJsSlashRequest extends SlashRequest {
     else await this.interaction.reply({ ...options, flags: MessageFlags.Ephemeral });
     this.replied = true;
   }
+
+  public async editOriginal(text: string): Promise<void> {
+    await this.interaction.editReply({
+      content: text.slice(0, DiscordJsSlashRequest.MAX_MESSAGE).toWellFormed(),
+      embeds: [], components: [], allowedMentions: { parse: [] },
+    });
+  }
 }
 
 class DiscordJsLogChannel extends LogChannel {
@@ -74,14 +79,21 @@ class DiscordJsLogChannel extends LogChannel {
   }
 
   public async hasEmbedLinks(channelId: string): Promise<boolean | null> {
+    const fields = `operation=check_embed_links channel=${Logger.field(channelId)}`;
     try {
       const channel = await this.client.channels.fetch(channelId);
-      if (!channel?.isSendable() || channel.isDMBased()) return null;
-      const botMember = await channel.guild.members.fetchMe();
-      return channel.permissionsFor(botMember)?.has(PermissionFlagsBits.EmbedLinks) ?? null;
-    } catch {
-      return null;
+      if (channel?.isSendable() && !channel.isDMBased()) {
+        const botMember = await channel.guild.members.fetchMe();
+        const permissions = channel.permissionsFor(botMember);
+        if (permissions) return permissions.has(PermissionFlagsBits.EmbedLinks);
+        Logger.write(LogLevel.warn, `discord_permissions_unavailable ${fields} reason=permissions_unknown`);
+      } else {
+        Logger.write(LogLevel.warn, `discord_permissions_unavailable ${fields} reason=channel_unavailable`);
+      }
+    } catch (error) {
+      Logger.write(LogLevel.warn, `discord_permissions_unavailable ${fields} ${Logger.failure(error)}`);
     }
+    return null;
   }
 
   public async send(channelId: string, embeds: ReadonlyArray<APIEmbed>): Promise<void> {
@@ -143,7 +155,10 @@ export class DiscordBot {
       if (before.premiumTier !== after.premiumTier) void this.events.boostChanged(after.id);
     });
     c.on("interactionCreate", (interaction) => {
-      this.onInteraction(interaction).catch(() => Logger.write(LogLevel.error, "Interaction failed."));
+      void this.onInteraction(interaction).catch((error: unknown) => {
+        const server = Logger.field(interaction.guildId ?? "none");
+        Logger.write(LogLevel.error, `interaction_failed operation=handle_interaction server=${server} ${Logger.failure(error)}`);
+      });
     });
   }
 
@@ -154,12 +169,14 @@ export class DiscordBot {
   }
 
   private async onReady(): Promise<void> {
+    let operation = "register_commands";
     try {
-      await this.client.application?.commands.set(this.registry.definitions() as never);
+      await this.client.application?.commands.set(this.registry.definitions());
+      operation = "catch_up_servers";
       await this.events.catchUp();
-      Logger.write(LogLevel.info, `Ready as ${this.client.user?.tag}, caught up ${this.client.guilds.cache.size} Servers.`);
-    } catch {
-      Logger.write(LogLevel.error, "Startup failed.");
+      Logger.write(LogLevel.info, `bot_ready operation=${operation} servers=${this.client.guilds.cache.size}`);
+    } catch (error) {
+      Logger.write(LogLevel.error, `startup_failed operation=${operation} ${Logger.failure(error)}`);
     }
   }
 }

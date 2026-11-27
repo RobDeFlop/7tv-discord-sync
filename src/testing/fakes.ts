@@ -234,7 +234,7 @@ export class FakeSevenTv extends SevenTvPort {
   public async resolveEmoteLink(link: string): Promise<SevenTvEmote> {
     const id = /^https:\/\/7tv\.app\/emotes\/([\w-]+)$/.exec(link)?.[1];
     const emote = id ? this.emotes.get(id) : undefined;
-    if (!emote) throw new InvalidLinkError(link, "emote");
+    if (!emote) throw new InvalidLinkError("emote");
     return { ...emote };
   }
 
@@ -246,7 +246,7 @@ export class FakeSevenTv extends SevenTvPort {
   public async resolveUserLink(link: string): Promise<SevenTvUser> {
     const id = /^https:\/\/7tv\.app\/users\/([\w-]+)$/.exec(link)?.[1];
     const user = id ? this.users.get(id) : undefined;
-    if (!user) throw new InvalidLinkError(link, "user");
+    if (!user) throw new InvalidLinkError("user");
     return { ...user };
   }
 

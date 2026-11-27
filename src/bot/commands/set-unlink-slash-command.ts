@@ -17,7 +17,9 @@ export class SetUnlinkSlashCommand extends SlashCommand {
     },
   ];
 
-  protected run(server: ServerId, request: SlashRequest): Promise<string> {
-    return this.apply(server, new UnlinkSourceSetCommand(this.requiredString(request, "emotes") === "keep"));
+  protected async run(server: ServerId, request: SlashRequest): Promise<string> {
+    const emotes = request.option("emotes");
+    if (emotes !== "delete" && emotes !== "keep") return "Choose whether to delete or keep the Source Set's emotes.";
+    return this.apply(server, new UnlinkSourceSetCommand(emotes === "keep"));
   }
 }

@@ -1,11 +1,14 @@
 import { Application } from "./bot/application.ts";
-import { Logger, LogLevel } from "./bot/logger.ts";
-import { Config } from "./config.ts";
+import { Config, MissingConfigError } from "./config.ts";
+import { Logger, LogLevel } from "./logger.ts";
 
-const config = Config.fromEnv();
+let operation = "read_config";
 try {
+  const config = Config.fromEnv();
+  operation = "start_application";
   await new Application(config).start();
-} catch {
-  Logger.write(LogLevel.error, "Bot startup failed. Check the database connection and Discord token.");
+} catch (error) {
+  const configFields = error instanceof MissingConfigError ? ` missing=${error.variables.join(",")}` : "";
+  Logger.write(LogLevel.error, `startup_failed operation=${operation} ${Logger.failure(error)}${configFields}`);
   process.exit(1);
 }

@@ -1,3 +1,5 @@
+import { Logger, LogLevel } from "../../logger.ts";
+
 /** The slice of a WebSocket the EventAPI client uses. */
 export abstract class EventSocket {
   public onopen: ((ev: unknown) => void) | null = null;
@@ -19,7 +21,10 @@ export class WebSocketEventSocket extends EventSocket {
     this.socket.onopen = (ev) => this.onopen?.(ev);
     this.socket.onmessage = (ev) => this.onmessage?.({ data: ev.data });
     this.socket.onclose = (ev) => this.onclose?.({ code: ev.code });
-    this.socket.onerror = (ev) => this.onerror?.(ev);
+    this.socket.onerror = (ev) => {
+      const error: unknown = typeof ErrorEvent !== "undefined" && ev instanceof ErrorEvent ? ev.error : undefined;
+      this.onerror?.(error ?? ev);
+    };
   }
 
   public send(data: string): void {
@@ -36,8 +41,8 @@ export interface Dispatch {
   type: DispatchType;
   /** Id of the changed set / user. */
   objectId: string;
-  /** Top-level keys the update touched, when the payload says. */
-  changedKeys?: string[];
+  /** Top-level keys the update touched, empty if the payload does not specify any. */
+  changedKeys: readonly string[];
 }
 
 export const EVENT_API_URL = "wss://events.7tv.io/v3";
@@ -64,6 +69,8 @@ export class EventApiClient {
   private attempt = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastInterval = 45_000;
+  private readonly lastLog = new Map<string, number>();
   private readonly subs = new Map<string, { type: DispatchType; id: string }>();
 
   public constructor(private readonly opts: EventApiOptions) {}
@@ -82,7 +89,7 @@ export class EventApiClient {
     const s = this.socket;
     this.socket = null;
     this.open = false;
-    s?.close();
+    if (s) this.close(s);
   }
 
   public watch(type: DispatchType, id: string): void {
@@ -93,67 +100,136 @@ export class EventApiClient {
   }
 
   private sendSubscribe(type: DispatchType, id: string): void {
-    this.socket?.send(JSON.stringify({ op: 35, d: { type, condition: { object_id: id } } }));
+    try {
+      this.socket?.send(JSON.stringify({ op: 35, d: { type, condition: { object_id: id } } }));
+    } catch (error) {
+      this.logFailure("seventv_socket_failed", "subscribe", Logger.failure(error));
+    }
   }
 
   private connect(): void {
-    const socket = this.opts.createSocket(this.opts.url ?? EVENT_API_URL);
+    let socket: EventSocket;
+    try {
+      socket = this.opts.createSocket(this.opts.url ?? EVENT_API_URL);
+    } catch (error) {
+      this.logFailure("seventv_socket_failed", "connect", Logger.failure(error));
+      this.scheduleReconnect();
+      return;
+    }
     this.socket = socket;
     socket.onmessage = (ev) => this.onMessage(socket, ev.data);
     socket.onclose = (ev) => this.onClose(socket, ev.code);
-    socket.onerror = () => {};
+    socket.onerror = (error) => {
+      if (socket === this.socket) this.logFailure("seventv_socket_failed", "receive", Logger.failure(error));
+    };
   }
 
   private onMessage(socket: EventSocket, raw: unknown): void {
     if (socket !== this.socket) return;
-    let msg: { op: number; d?: any };
+    let msg: unknown;
+    if (typeof raw !== "string") {
+      this.logFailure("seventv_event_invalid", "decode", "reason=non_text_frame");
+      return;
+    }
     try {
-      msg = JSON.parse(String(raw));
-    } catch {
+      msg = JSON.parse(raw);
+    } catch (error) {
+      this.logFailure("seventv_event_invalid", "decode", Logger.failure(error));
+      return;
+    }
+    if (!EventApiClient.isRecord(msg) || typeof msg.op !== "number" || !Number.isSafeInteger(msg.op)) {
+      this.logFailure("seventv_event_invalid", "validate_envelope", "reason=invalid_opcode");
       return;
     }
     switch (msg.op) {
       case 1: {
+        const interval = EventApiClient.isRecord(msg.d) ? msg.d.heartbeat_interval : undefined;
+        if (typeof interval !== "number" || !Number.isSafeInteger(interval) || interval <= 0 || interval * 3 > 2_147_483_647) {
+          this.logFailure("seventv_event_invalid", "validate_hello", "reason=invalid_heartbeat_interval");
+          return;
+        }
         this.open = true;
         this.attempt = 0;
         for (const s of this.subs.values()) this.sendSubscribe(s.type, s.id);
-        this.armHeartbeat(msg.d?.heartbeat_interval);
+        this.lastInterval = interval;
+        this.armHeartbeat();
         break;
       }
       case 2:
-        this.armHeartbeat(this.lastInterval);
+        this.armHeartbeat();
         break;
-      case 0: {
-        const d = msg.d;
-        if ((d?.type === "emote_set.update" || d?.type === "user.update") && typeof d.body?.id === "string") {
-          const updated: { key?: string }[] | undefined = d.body.updated;
-          const changedKeys = [...(updated ?? []), ...(d.body.pushed ?? []), ...(d.body.pulled ?? [])]
-            .map((c: { key?: string }) => c.key)
-            .filter((k): k is string => typeof k === "string");
-          this.opts.onDispatch({ type: d.type, objectId: d.body.id, changedKeys });
-        }
+      case 0:
+        this.dispatch(msg.d);
+        break;
+      case 4: // Reconnect
+        this.close(socket, 4000);
+        break;
+      case 6: { // EventAPI error packet; never log its text/body.
+        const code = EventApiClient.isRecord(msg.d) ? msg.d.code : undefined;
+        const details = typeof code === "number" && Number.isSafeInteger(code) ? `code=${code}` : "reason=remote_error";
+        this.logFailure("seventv_socket_failed", "server_error", details);
         break;
       }
-      case 4: // Reconnect
-        socket.close();
-        this.onClose(socket, 4000);
-        break;
     }
   }
 
-  private lastInterval = 45_000;
-  private armHeartbeat(interval?: number): void {
-    if (interval) this.lastInterval = interval;
+  private dispatch(data: unknown): void {
+    if (!EventApiClient.isRecord(data) || typeof data.type !== "string") {
+      this.logFailure("seventv_event_invalid", "validate_dispatch", "reason=invalid_dispatch");
+      return;
+    }
+    const { type, body } = data;
+    if (type !== "emote_set.update" && type !== "user.update") return;
+    if (!EventApiClient.isRecord(body) || typeof body.id !== "string" || !/^[a-zA-Z0-9_-]+$/.test(body.id)) {
+      this.logFailure("seventv_event_invalid", "validate_dispatch", "reason=invalid_body");
+      return;
+    }
+    const keys = EventApiClient.changeKeys(body);
+    if (keys === null) {
+      this.logFailure("seventv_event_invalid", "validate_dispatch", "reason=invalid_changes");
+      return;
+    }
+    try {
+      this.opts.onDispatch({ type, objectId: body.id, changedKeys: keys });
+    } catch (error) {
+      this.logFailure("seventv_socket_failed", "dispatch", Logger.failure(error));
+    }
+  }
+
+  private static changeKeys(body: Record<string, unknown>): string[] | null {
+    const keys: string[] = [];
+    for (const field of ["updated", "pushed", "pulled"]) {
+      const changes = body[field];
+      if (changes == null) continue;
+      if (!Array.isArray(changes)) return null;
+      for (const change of changes) {
+        if (!EventApiClient.isRecord(change) || typeof change.key !== "string") return null;
+        keys.push(change.key);
+      }
+    }
+    return keys;
+  }
+
+  private static isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+
+  private armHeartbeat(): void {
     if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
     // three missed heartbeats means the connection is dead
     this.heartbeatTimer = setTimeout(() => {
-      const s = this.socket;
-      if (s) {
-        s.close();
-        this.onClose(s, 4008);
-      }
+      if (this.socket) this.close(this.socket, 4008);
     }, this.lastInterval * 3);
-    (this.heartbeatTimer as { unref?: () => void }).unref?.();
+    this.heartbeatTimer.unref();
+  }
+
+  private close(socket: EventSocket, code?: number): void {
+    try {
+      socket.close();
+    } catch (error) {
+      this.logFailure("seventv_socket_failed", "close_socket", Logger.failure(error));
+    }
+    this.onClose(socket, code);
   }
 
   private onClose(socket: EventSocket, code?: number): void {
@@ -161,7 +237,24 @@ export class EventApiClient {
     this.socket = null;
     this.open = false;
     if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
-    if (!this.running || (code !== undefined && FATAL_CLOSE.has(code))) return;
+    this.heartbeatTimer = null;
+    if (!this.running) return;
+    if (code !== 1000 && code !== 4000) {
+      this.logFailure("seventv_socket_failed", "closed", Number.isSafeInteger(code) ? `code=${code}` : "reason=unknown_code");
+    }
+    if (code === undefined || !FATAL_CLOSE.has(code)) this.scheduleReconnect(code);
+  }
+
+  private logFailure(event: string, operation: string, details: string): void {
+    // The socket can deliver malformed frames and emit errors repeatedly while reconnecting.
+    const now = performance.now();
+    const previous = this.lastLog.get(operation);
+    if (previous !== undefined && now - previous < 60_000) return;
+    this.lastLog.set(operation, now);
+    Logger.write(LogLevel.warn, `${event} operation=${operation} ${details}`);
+  }
+
+  private scheduleReconnect(code?: number): void {
     const base = this.opts.backoffMs?.(this.attempt) ?? Math.min(60_000, 1000 * 2 ** this.attempt) * (0.5 + Math.random() / 2);
     // maintenance: wait at least 5 minutes
     const delay = code === 4007 ? Math.max(base, 300_000) : base;
@@ -170,6 +263,6 @@ export class EventApiClient {
       this.timer = null;
       if (this.running) this.connect();
     }, delay);
-    (this.timer as { unref?: () => void }).unref?.();
+    this.timer.unref();
   }
 }

@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
-import { LinkSourceSetCommand, SetTrendingCommand, SyncCore } from "./index.ts";
+import { describe, expect, spyOn, test } from "bun:test";
+import { ConfigureLogChannelCommand, SetTrendingCommand, SyncCore, UnlinkSourceSetCommand } from "./index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
 
 const S = "server-1";
@@ -9,12 +9,13 @@ function setup() {
   const discord = new FakeDiscord();
   discord.addServer(S, { boostLevel: 0 });
   const sevenTv = new FakeSevenTv();
-  const core = new SyncCore(sevenTv, discord, new FakeStore());
+  const store = new FakeStore();
+  const core = new SyncCore(sevenTv, discord, store);
   sevenTv.addUser({ id: "u1", username: "streamer", activeSetId: "setA" });
   const emotes = (ids: string[]) => {
     for (const id of ids) sevenTv.addEmote({ id, name: id.toUpperCase().repeat(2), animated: false });
   };
-  return { discord, sevenTv, core, emotes };
+  return { discord, sevenTv, store, core, emotes };
 }
 
 describe("Trending Fill", () => {
@@ -42,9 +43,36 @@ describe("Manage Expressions permission", () => {
     emotes(["a"]);
     sevenTv.setEmotes("setA", "Main", ["a"]);
     discord.revokeManageExpressions(S);
-    const r = await core.apply(S, new LinkSourceSetCommand(userLink("u1")));
+    const r = await core.linkSourceSet(S, userLink("u1"));
     expect(r.feedback.filter((f) => f.level === "error")).toHaveLength(1);
     expect(discord.emojis(S)).toEqual([]);
+  });
+
+  test("every Command checks permissions before loading state or writing to Discord", async () => {
+    const { discord, core, store, emotes } = setup();
+    emotes(["a"]);
+    const preview = await core.prepareEmoteAdd(S, "https://7tv.app/emotes/a");
+    if (!("prepared" in preview)) throw new Error("Expected an importable preview");
+    discord.revokeManageExpressions(S);
+    const load = spyOn(store, "load");
+    const operations = [
+      () => core.linkSourceSet(S, userLink("u1")),
+      () => core.apply(S, new UnlinkSourceSetCommand(false)),
+      () => core.apply(S, new SetTrendingCommand(true)),
+      () => core.apply(S, new ConfigureLogChannelCommand("log")),
+      () => core.addEmote(S, preview.prepared),
+      () => core.removeEmote(S, "AA"),
+    ];
+    try {
+      for (const run of operations) {
+        expect((await run()).feedback[0]?.text).toContain("missing the Manage Expressions permission");
+      }
+      expect(load).not.toHaveBeenCalled();
+      expect(await store.listServers()).toEqual([]);
+      expect(discord.emojis(S)).toEqual([]);
+    } finally {
+      load.mockRestore();
+    }
   });
 
   test("/status shows whether the permission is missing", async () => {
@@ -61,17 +89,75 @@ describe("state survives unexpected errors", () => {
     emotes(["a", "b", "c"]);
     sevenTv.setEmotes("setA", "Main", ["a", "b", "c"]);
     discord.failCreatesAfter(S, 2, new Error("boom"));
-    await expect(core.apply(S, new LinkSourceSetCommand(userLink("u1")))).rejects.toThrow("boom");
+    await expect(core.linkSourceSet(S, userLink("u1"))).rejects.toThrow("boom");
 
     const status = await core.status(S);
     expect(status.quotas.static.byTier).toMatchObject({ source: 2, reserved: 0 });
   });
 
-  test("a failing 7TV call mid-reconcile keeps what was already applied", async () => {
+  test("Trending Fill persists Managed Emotes created before an upload fails", async () => {
+    const { discord, sevenTv, core, emotes } = setup();
+    emotes(["a", "b"]);
+    sevenTv.setTrending("week", ["a", "b"]);
+    discord.failCreatesAfter(S, 1, new Error("upload failed"));
+    await expect(core.apply(S, new SetTrendingCommand(true))).rejects.toThrow("upload failed");
+    expect((await core.status(S)).quotas.static.byTier).toMatchObject({ trending: 1, reserved: 0 });
+  });
+
+  test("unlink persists successful deletes before a later delete fails", async () => {
+    const { discord, sevenTv, store, core, emotes } = setup();
+    emotes(["a", "b"]);
+    sevenTv.setEmotes("setA", "Main", ["a", "b"]);
+    await core.linkSourceSet(S, userLink("u1"));
+    const deleteEmoji = discord.deleteEmoji.bind(discord);
+    const deletion = spyOn(discord, "deleteEmoji")
+      .mockImplementationOnce(deleteEmoji)
+      .mockRejectedValueOnce(new Error("delete failed"));
+    await expect(core.apply(S, new UnlinkSourceSetCommand(false))).rejects.toThrow("delete failed");
+    deletion.mockRestore();
+    expect((await store.load(S)).toSnapshot()).toMatchObject({
+      linkedUserId: "u1",
+      managedEmotes: [expect.objectContaining({ sevenTvEmoteId: "b", tier: "source" })],
+    });
+  });
+
+  test("remove persists ownership sync even when the Discord delete fails", async () => {
+    const { discord, sevenTv, store, core, emotes } = setup();
+    emotes(["a", "b"]);
+    sevenTv.setEmotes("setA", "Main", ["a", "b"]);
+    await core.linkSourceSet(S, userLink("u1"));
+    const departed = discord.emojis(S).find((emoji) => emoji.name === "BB");
+    if (!departed) throw new Error("Expected a second Managed Emote");
+    discord.removeEmojiByHand(S, departed.id);
+    const reserved = discord.seedEmoji(S, { name: "admin", animated: false });
+    const deletion = spyOn(discord, "deleteEmoji").mockRejectedValueOnce(new Error("delete failed"));
+    await expect(core.removeEmote(S, "AA")).rejects.toThrow("delete failed");
+    deletion.mockRestore();
+    expect((await store.load(S)).toSnapshot()).toMatchObject({
+      managedEmotes: [expect.objectContaining({ sevenTvEmoteId: "a", tier: "source" })],
+      reservedSlots: [expect.objectContaining({ discordEmojiId: reserved.id })],
+    });
+  });
+
+  test("configure log channel persists ownership without reclassifying Managed Emotes", async () => {
+    const { discord, sevenTv, store, core, emotes } = setup();
+    emotes(["a"]);
+    sevenTv.setEmotes("setA", "Main", ["a"]);
+    await core.linkSourceSet(S, userLink("u1"));
+    const reserved = discord.seedEmoji(S, { name: "admin", animated: false });
+    await core.apply(S, new ConfigureLogChannelCommand("log"));
+    expect((await store.load(S)).toSnapshot()).toMatchObject({
+      logChannelId: "log",
+      managedEmotes: [expect.objectContaining({ sevenTvEmoteId: "a", tier: "source" })],
+      reservedSlots: [expect.objectContaining({ discordEmojiId: reserved.id })],
+    });
+  });
+
+  test("a failing Discord call mid-reconcile keeps what was already applied", async () => {
     const { discord, sevenTv, core, emotes } = setup();
     emotes(["a"]);
     sevenTv.setEmotes("setA", "Main", ["a"]);
-    await core.apply(S, new LinkSourceSetCommand(userLink("u1")));
+    await core.linkSourceSet(S, userLink("u1"));
     emotes(["b"]);
     sevenTv.setEmotes("setA", "Main", ["a", "b"]);
     discord.failCreatesAfter(S, 0, new Error("down"));

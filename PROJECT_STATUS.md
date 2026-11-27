@@ -1,9 +1,7 @@
 # Project status
 
-**Progress:** Contributor rules are consolidated in [AGENTS.md](AGENTS.md). An architecture and AGENTS.md compliance review was filed as issues #32–#40, which are linked by native blocking dependencies.
-
-**Blocker:** Bun auto-loads `.env`, so `bun test` runs the PostgreSQL store suite against the database in `.env`'s `DATABASE_URL`, migrating it and deleting rows. Until #32 lands, run the suite only when `.env` points at a disposable database.
+**Progress:** #32–#40 are implemented on `fix/issues-32-40`. Store tests require an explicit disposable `TEST_DATABASE_URL`. Commands and reconciliation share a Server session, and background sync scheduling follows [ADR 0001](docs/adr/0001-core-owned-server-sync.md).
 
 **Known limitation:** The repository has no configured formatter or linter. Style and unused imports require diff review; TypeScript checking and Bun tests are separate gates.
 
-**Next action:** Start with #32. #33, #34, #35 and #36 have no blockers and can proceed in parallel afterwards.
+**Next action:** Review the combined change before merging. In Discord, confirm that queued commands edit their original private replies and that an expired reply falls back to the log channel or `/status`.

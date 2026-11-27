@@ -1,12 +1,13 @@
-import { describe, expect, jest, test } from "bun:test";
+import { describe, expect, jest, spyOn, test } from "bun:test";
 import { RateLimitError } from "../adapters/discord/write-queue.ts";
-import { ConfigureLogChannelCommand, LinkSourceSetCommand, SyncCore } from "../core/index.ts";
+import { ConfigureLogChannelCommand, SyncCore } from "../core/index.ts";
+import { MAX_CONCURRENT_RECONCILES } from "../core/sync-scheduler.ts";
 import type { ServerId } from "../domain/index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
 import { FeedbackRouter } from "./feedback-router.ts";
 import { GatewayEvents } from "./gateway-events.ts";
+import { Logger, LogLevel } from "./logger.ts";
 import { FakeLogChannel, FakeServers } from "../testing/bot-fakes.ts";
-import { ServerLock } from "./server-lock.ts";
 
 const A = "server-a";
 const B = "server-b";
@@ -15,15 +16,18 @@ function setup() {
   const discord = new FakeDiscord();
   const sevenTv = new FakeSevenTv();
   const store = new FakeStore();
-  const core = new SyncCore(sevenTv, discord, store);
+  const core = new SyncCore(sevenTv, discord, store, (server, operation, error) => {
+    Logger.write(LogLevel.error, `sync_failed operation=${operation} server=${Logger.field(server)} ${Logger.failure(error)}`);
+  });
   const log = new FakeLogChannel();
   const servers = new FakeServers();
-  const events = new GatewayEvents(core, store, new FeedbackRouter(store, log), new ServerLock(), servers);
+  servers.ids = [A, B];
+  const events = new GatewayEvents(core, new FeedbackRouter(core, log), servers);
   for (const id of [A, B]) discord.addServer(id);
   sevenTv.addUser({ id: "u1", username: "streamer", activeSetId: "setA" });
   sevenTv.addEmote({ id: "e1", name: "Pog", animated: false });
   sevenTv.setEmotes("setA", "A", ["e1"]);
-  const link = (server: ServerId) => core.apply(server, new LinkSourceSetCommand("https://7tv.app/users/u1"));
+  const link = (server: ServerId) => core.linkSourceSet(server, "https://7tv.app/users/u1");
   const names = (server: ServerId) => discord.emojis(server).map((e) => e.name);
   return { discord, sevenTv, store, core, log, servers, events, link, names };
 }
@@ -52,41 +56,27 @@ describe("server events", () => {
     expect(names(A)).toEqual(["Pog"]);
   });
 
+  test("a failed reconcile logs the Server and operation and keeps the admin feedback distinct", async () => {
+    const { core, discord, events, log } = setup();
+    await core.apply(A, new ConfigureLogChannelCommand("log"));
+    const reconcile = spyOn(discord, "listEmojis").mockRejectedValueOnce(new TypeError("private detail"));
+    const errors = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await events.emojiChanged(A);
+      expect(errors.mock.calls).toEqual([[expect.stringMatching(/ ERROR sync_failed operation=reconcile server=server-a error=TypeError$/)]]);
+      expect(log.sent[0]?.embeds[0]?.description).toBe("Sync failed. Try /sync again in a moment.");
+    } finally {
+      reconcile.mockRestore();
+      errors.mockRestore();
+    }
+  });
+
   test("a boost level change reconciles the Server", async () => {
     const { discord, core, events } = setup();
     await events.serverJoined(A);
     discord.setBoostLevel(A, 1);
     await events.boostChanged(A);
     expect((await core.status(A)).quotas.static.free).toBe(100);
-  });
-
-  test("a rate-limited sync pauses, coalesces events and resumes without another event", async () => {
-    jest.useFakeTimers();
-    try {
-      const { discord, sevenTv, core, events, link, log, names } = setup();
-      await core.apply(A, new ConfigureLogChannelCommand("log"));
-      await link(A);
-      sevenTv.addEmote({ id: "e2", name: "Kappa", animated: false });
-      sevenTv.setEmotes("setA", "A", ["e1", "e2"]);
-      discord.failCreatesAfter(A, 0, new RateLimitError(2_000));
-      await events.emojiChanged(A);
-      expect(log.sent[0]?.embeds[0]?.title).toBe("Sync warnings");
-      expect(log.sent[0]?.embeds[0]?.description).toMatch(/paused.*resume/i);
-      await events.boostChanged(A);
-      jest.advanceTimersByTime(2_000);
-      await events.idle();
-      expect(log.sent).toHaveLength(2); // the first retry was also rate limited
-      discord.allowCreates(A);
-      await events.emojiChanged(A);
-      jest.advanceTimersByTime(3_999);
-      await events.idle();
-      expect(names(A)).toEqual(["Pog"]);
-      jest.advanceTimersByTime(1);
-      await events.idle();
-      expect(names(A).sort()).toEqual(["Kappa", "Pog"]);
-    } finally {
-      jest.useRealTimers();
-    }
   });
 
   test("leaving a Server cancels its paused sync", async () => {
@@ -137,6 +127,34 @@ describe("7TV changes", () => {
     expect(discord.emojis(B)).toEqual([]);
   });
 
+  test("a burst during a target scan coalesces into one follow-up scan", async () => {
+    const { events, link, sevenTv, store } = setup();
+    await link(A);
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const listServers = store.listServers.bind(store);
+    const list = spyOn(store, "listServers").mockImplementationOnce(async () => {
+      started.resolve();
+      await release.promise;
+      return listServers();
+    });
+    const unsubscribe = events.listenToSevenTv(sevenTv);
+    try {
+      sevenTv.emit({ type: "set-changed", setId: "setA" });
+      await started.promise;
+      for (let i = 0; i < 20; i++) sevenTv.emit({ type: "active-set-switched", userId: "u1" });
+      expect(list).toHaveBeenCalledTimes(1);
+      release.resolve();
+      await events.idle();
+      expect(list).toHaveBeenCalledTimes(2);
+    } finally {
+      release.resolve();
+      await events.idle();
+      unsubscribe();
+      list.mockRestore();
+    }
+  });
+
   test("subscribes to the 7TV port and reconciles on its events", async () => {
     const { sevenTv, events, link, names } = setup();
     await link(A);
@@ -162,6 +180,33 @@ describe("catch-up", () => {
     void core;
   });
 
+  test("a setting already in progress cannot enqueue sync after the bot leaves", async () => {
+    const { core, discord, events, sevenTv, store } = setup();
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const resolveLink = sevenTv.resolveUserLink.bind(sevenTv);
+    const resolve = spyOn(sevenTv, "resolveUserLink").mockImplementationOnce(async (link) => {
+      started.resolve();
+      await release.promise;
+      return resolveLink(link);
+    });
+    const setting = core.linkSourceSet(A, "https://7tv.app/users/u1");
+    try {
+      await started.promise;
+      const removed = events.serverLeft(A);
+      release.resolve();
+      expect((await setting).feedback[0]?.text).toContain("cancelled");
+      await removed;
+      await events.idle();
+      expect(await store.listServers()).not.toContain(A);
+      expect(discord.emojis(A)).toEqual([]);
+    } finally {
+      release.resolve();
+      await setting;
+      resolve.mockRestore();
+    }
+  });
+
   test("a failing Server does not stop the others", async () => {
     const { servers, events, link, names, discord } = setup();
     await link(A);
@@ -173,12 +218,20 @@ describe("catch-up", () => {
 });
 
 describe("feedback routing", () => {
+  test("a silent automatic follow-up does not erase the last meaningful summary", async () => {
+    const { core, events, link } = setup();
+    await link(A);
+    expect((await core.status(A)).lastSync?.changeCount).toBe(1);
+    await events.emojiChanged(A);
+    expect((await core.status(A)).lastSync?.changeCount).toBe(1);
+  });
+
   test("automatic sync feedback goes to the log channel when one is set", async () => {
     const { discord, core, log, events } = setup();
     await core.apply(A, new ConfigureLogChannelCommand("chan-1"));
     discord.revokeManageExpressions(A);
     discord.seedEmoji(A, { name: "x", animated: false });
-    await core.apply(A, new LinkSourceSetCommand("https://7tv.app/users/u1")); // no permission, feedback ignored here
+    await core.linkSourceSet(A, "https://7tv.app/users/u1"); // no permission, feedback ignored here
     expect(log.sent).toEqual([]);
     await events.emojiChanged(A);
     expect(log.sent).toHaveLength(1);
@@ -214,27 +267,54 @@ describe("feedback routing", () => {
   });
 });
 
-describe("ServerLock", () => {
-  test("runs tasks for one Server one after another", async () => {
-    const lock = new ServerLock();
-    const order: string[] = [];
-    const slow = lock.run(A, async () => {
-      order.push("start1");
-      await new Promise((r) => setTimeout(r, 10));
-      order.push("end1");
-    });
-    const next = lock.run(A, async () => void order.push("start2"));
-    await Promise.all([slow, next]);
-    expect(order).toEqual(["start1", "end1", "start2"]);
+test.each(["startup catch-up", "7TV change"] as const)("%s limits active reconciles and tries every Server", async (event) => {
+  const { core, discord, events, servers, store } = setup();
+  servers.ids = Array.from({ length: MAX_CONCURRENT_RECONCILES * 3 }, (_, i) => `target-${i}`);
+  for (const server of servers.ids) {
+    discord.addServer(server);
+    const state = await store.load(server);
+    state.linkUser("u1");
+    await store.save(server, state);
+  }
+  const firstWave = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const attempted: ServerId[] = [];
+  let active = 0;
+  let peak = 0;
+  const waitingServer = servers.ids[MAX_CONCURRENT_RECONCILES];
+  if (!waitingServer) throw new Error("Expected a Server waiting for capacity");
+  let checkingCommand = false;
+  const list = spyOn(discord, "listEmojis").mockImplementation(async (server) => {
+    if (checkingCommand && server === waitingServer) return [];
+    attempted.push(server);
+    peak = Math.max(peak, ++active);
+    if (active === MAX_CONCURRENT_RECONCILES) firstWave.resolve();
+    try {
+      await release.promise;
+      if (server === servers.ids[0]) throw new Error("one Server failed");
+      return [];
+    } finally {
+      active--;
+    }
   });
-
-  test("coalesces tasks queued while one is waiting", async () => {
-    const lock = new ServerLock();
-    let runs = 0;
-    const first = lock.coalesce(A, async () => void (await new Promise((r) => setTimeout(r, 10)), runs++));
-    const second = lock.coalesce(A, async () => void runs++);
-    const third = lock.coalesce(A, async () => void runs++);
-    await Promise.all([first, second, third]);
-    expect(runs).toBe(2); // the running one, plus one for everything that arrived meanwhile
-  });
+  const scheduling = event === "startup catch-up"
+    ? events.catchUp()
+    : events.sevenTvChanged({ type: "set-changed", setId: "setA" });
+  try {
+    await firstWave.promise;
+    await Bun.sleep(0);
+    expect(peak).toBe(MAX_CONCURRENT_RECONCILES);
+    expect(attempted).toHaveLength(MAX_CONCURRENT_RECONCILES);
+    checkingCommand = true;
+    const command = core.apply(waitingServer, new ConfigureLogChannelCommand("log"));
+    const result = await Promise.race([command, Bun.sleep(150).then(() => null)]);
+    expect(result?.feedback[0]?.text).toBe("Log channel updated.");
+  } finally {
+    checkingCommand = false;
+    release.resolve();
+    await scheduling;
+    list.mockRestore();
+  }
+  expect(peak).toBe(MAX_CONCURRENT_RECONCILES);
+  expect(attempted.sort()).toEqual([...servers.ids].sort());
 });
