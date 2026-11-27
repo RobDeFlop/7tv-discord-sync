@@ -119,4 +119,4 @@ bun run typecheck   # type-check
 bun run db:generate # regenerate migrations after a schema change (needs DATABASE_URL)
 ```
 
-Coding standards are in `docs/agents/coding-standards.md`.
+Coding standards are in `docs/agents/coding-standards.md`. In conditions, use booleans directly or negate them with `!` rather than comparing them to `true` or `false`. Check for `null` explicitly when it represents a distinct unknown state.

@@ -31,7 +31,7 @@ export class StatusSlashCommand extends SlashCommand {
     if (!status.manageExpressions) {
       actions.push("Missing **Manage Expressions**. Grant it to the bot’s role and run `/sync` to resume emoji updates.");
     }
-    if (channel && hasEmbedLinks === false) {
+    if (channel && hasEmbedLinks !== null && !hasEmbedLinks) {
       actions.push(`Missing **Embed Links** in ${channel}. Grant it to the bot in that channel to restore sync feedback.`);
     }
     if (status.problems.some((problem) => problem.kind !== "renamed-with-suffix")) {

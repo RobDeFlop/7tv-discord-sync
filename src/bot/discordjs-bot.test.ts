@@ -169,6 +169,7 @@ test("a log channel permission read failure does not break /status or claim Embe
   const status = await fixture.status();
   fixture.expectChannelLookup("chan-1");
   expect(status.title).toBe("No action needed");
+  expect(status.description).toBeUndefined();
   expect(status.fields?.find((field) => field.name === "Settings")?.value).toContain("Log channel: <#chan-1>");
   expect(status.fields).toContainEqual({ name: "Write queue", value: "Idle" });
   fixture.expectNoPublicPost();
@@ -178,6 +179,8 @@ test("with no log channel, /status and /sync neither look up a channel nor post 
   const fixture = new LogChannelStatusFixture();
   await fixture.seed(null);
   const status = await fixture.status();
+  expect(status.title).toBe("No action needed");
+  expect(status.description).toBeUndefined();
   expect(status.fields?.find((field) => field.name === "Settings")?.value).toContain("Log channel: Not set");
   await fixture.syncAndWait();
   fixture.expectNoChannelLookup();
