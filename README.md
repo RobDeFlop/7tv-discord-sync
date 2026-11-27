@@ -9,7 +9,7 @@ A Discord bot that keeps a server's emojis in sync with emotes from [7TV](https:
 
 ## Install with Docker Compose
 
-Follow the [operator install guide](install/README.md) to run a versioned image with bundled PostgreSQL (default) or your existing database. For a source install instead, follow the steps below.
+Start at the public [container package page](https://github.com/users/RobDeFlop/packages/container/package/7tv-discord-sync). Its description explains how to copy the [operator install guide](install/README.md), Compose files and example environment from the release image without a clone or login. Choose bundled PostgreSQL (default) or your existing database. For a source install instead, follow the steps below.
 
 ## Source install requirements
 

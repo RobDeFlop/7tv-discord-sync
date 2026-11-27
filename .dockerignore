@@ -1,4 +1,4 @@
-# Only runtime sources, migration assets and the locked manifests belong in the build context.
+# Include only runtime sources, migration assets, locked manifests and the operator bundle.
 **
 !package.json
 !bun.lock
@@ -9,3 +9,7 @@ src/**/*.test.ts
 src/testing/**
 **/.env*
 **/*.env
+!install/.example.env
+!install/compose.yaml
+!install/compose.external.yaml
+!install/README.md

@@ -38,8 +38,20 @@ jobs:
         run: |
           tags=$(bash .github/scripts/release-tags.sh "$GITHUB_REF")
           printf 'tags<<END\n%s\nEND\n' "$tags" >> "$GITHUB_OUTPUT"
-      - name: Build Linux/AMD64 image locally
-        run: docker build --platform linux/amd64 --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" -t bot:test .
+          printf 'version=%s\n' "${tags%%$'\n'*}" >> "$GITHUB_OUTPUT"
+      - name: Build locally and verify the anonymous installation bundle
+        env:
+          VERSION: ${{ steps.version.outputs.version || '1.2.0' }}
+          IMAGE: ghcr.io/robdeflop/7tv-discord-sync
+        run: |
+          versions=("$VERSION")
+          if [[ $GITHUB_EVENT_NAME == pull_request ]]; then versions+=(1.3.0-beta.1); fi
+          for version in "${versions[@]}"; do
+            docker build --platform linux/amd64 --provenance=false --build-arg "BOT_VERSION=$version" \
+              --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" -t "$IMAGE:$version" .
+            bash scripts/test-install-bundle.sh "$version"
+          done
+          docker tag "$IMAGE:$VERSION" bot:test
       - name: Migrate a fresh database and convert emote images with the runtime image
         run: |
           docker run --rm --network container:${{ job.services.postgres.id }} \

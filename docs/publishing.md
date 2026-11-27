@@ -21,6 +21,10 @@ bash .github/scripts/release-tags.sh refs/tags/v1.3.0-beta.1
 
 After the first successful publish, open the **7tv-discord-sync package** under RobDeFlop's GitHub profile → **Packages** → **Package settings**. Under **Danger Zone → Change visibility**, select **Public** and confirm. This makes only the container package public, not the repository. Public package visibility cannot be changed back to private. If the package already existed and the workflow cannot write to it, grant the source repository **Write** under the package's **Manage Actions access**; don't use a personal access token.
 
+## Public installation instructions
+
+The public [GHCR package page](https://github.com/users/RobDeFlop/packages/container/package/7tv-discord-sync) shows the retrieval command from the image's `org.opencontainers.image.description` label. Share the package page, not this private source repository. The command copies the version-matched Compose files, `.example.env` and operator guide out of an unstarted container. No separate installation repository or GitHub Release assets are needed.
+
 ## Verify anonymous access
 
 On a clean Linux Docker host without a GHCR login or credential helper, pull the exact released version. For example, after `v1.2.0`:
@@ -31,4 +35,4 @@ docker --config "$config" pull --platform linux/amd64 ghcr.io/robdeflop/7tv-disc
 rmdir "$config"
 ```
 
-A successful pull reports the image digest and requires neither source access nor `docker login`. If denied, check **package** visibility and the exact image name and tag; do not change repository visibility.
+A successful pull reports the image digest and requires neither source access nor `docker login`. While signed out of GitHub, check that the package page displays the copy instructions. To read the same instructions directly for a particular pulled version, use `docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.description"}}' ghcr.io/robdeflop/7tv-discord-sync:1.2.0`. If denied, check **package** visibility and the exact image name and tag; do not change repository visibility.

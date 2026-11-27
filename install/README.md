@@ -13,7 +13,7 @@ Use Docker with Compose on Linux/AMD64 (or Docker Desktop in Linux containers mo
 
    The bot needs **Manage Expressions** and, in its log channel, **View Channel**, **Send Messages** and **Embed Links**.
 3. In the directory containing `compose.yaml`, copy `.example.env` to `.env`. Keep `.env` private; do not share or commit it.
-4. Set `DISCORD_TOKEN` in `.env`. Set `BOT_VERSION` to the exact image version you want to run: for example, release `v1.2.0` uses `ghcr.io/robdeflop/7tv-discord-sync:1.2.0`. Do not use `latest` or include the `v`.
+4. Set `DISCORD_TOKEN` in `.env`. When you copy these files from a release image, `BOT_VERSION` is already set to that exact release; leave it unchanged. If using files from the source checkout instead, set `BOT_VERSION` to the desired published version without `v` (for example `1.3.0-beta.1`), never `latest`.
 
 ## Option 1: Bundled PostgreSQL (default)
 
