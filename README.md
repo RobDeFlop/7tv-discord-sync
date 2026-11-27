@@ -7,7 +7,11 @@ A Discord bot that keeps a server's emojis in sync with emotes from [7TV](https:
 - Optionally fill leftover slots with trending emotes.
 - Emojis you uploaded yourself are never touched.
 
-## Requirements
+## Install with Docker Compose
+
+Follow the [operator install guide](install/README.md) to run a versioned image with bundled PostgreSQL (default) or your existing database. For a source install instead, follow the steps below.
+
+## Source install requirements
 
 - [Bun](https://bun.sh) 1.4 or newer
 - A Postgres database (local or hosted, e.g. Neon or Supabase)
@@ -119,5 +123,7 @@ bun test            # run the tests
 bun run typecheck   # type-check
 bun run db:generate # regenerate migrations after a schema change (needs DATABASE_URL)
 ```
+
+With Docker Compose available, `bash scripts/test-compose.sh` checks both operator install paths using a local image and disposable databases. It does not require a Discord token or a published image.
 
 Coding standards are in `docs/agents/coding-standards.md`. In conditions, use booleans directly or negate them with `!` rather than comparing them to `true` or `false`. Check for `null` explicitly when it represents a distinct unknown state.
