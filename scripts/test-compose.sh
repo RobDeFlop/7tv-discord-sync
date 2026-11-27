@@ -6,7 +6,8 @@ cd "$(dirname "$0")/.."
 run_id="$(date +%s)-$$-$RANDOM"
 project="sync-test-$run_id"
 export BOT_VERSION="0.0.0-test.$run_id" DISCORD_TOKEN=invalid-test-token POSTGRES_PASSWORD=test-only
-image="ghcr.io/robdeflop/7tv-discord-sync:$BOT_VERSION"
+repository=ghcr.io/robdeflop/7tv-discord-sync
+image="$repository:$BOT_VERSION"
 bundled() { docker compose -p "$project" -f install/compose.yaml "$@"; }
 external() { docker compose -p "$project-external" -f install/compose.external.yaml "$@"; }
 export DATABASE_URL="postgres://postgres:$POSTGRES_PASSWORD@operator-db:5432/existing"
@@ -19,8 +20,9 @@ cleanup() {
 # Check the same install files operators use. Never pull or push the bot image.
 # The example env selects an exact release for either install path.
 for file in install/compose{,.external}.yaml; do
-  (unset BOT_VERSION; docker compose --env-file install/.example.env -f "$file" config --images) |
-    tr -d '\r' | grep -Eq '^ghcr\.io/robdeflop/7tv-discord-sync:[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+  example_version=$(unset BOT_VERSION; docker compose --env-file install/.example.env -f "$file" config --images |
+    tr -d '\r' | awk -v prefix="$repository:" 'index($0, prefix) == 1 {print substr($0, length(prefix) + 1)}')
+  bash .github/scripts/release-tags.sh "refs/tags/v$example_version" >/dev/null
 done
 bundled config --quiet
 [[ "$(external config --services | tr -d '\r')" == bot ]]
