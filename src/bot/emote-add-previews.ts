@@ -2,7 +2,7 @@ import { AddEmoteCommand, type EmoteAddPreparation, type PreparedEmoteAdd, type 
 import { EmoteNamer, type ServerId } from "../domain/index.ts";
 import type { EmoteAddInteraction } from "./emote-add-interaction.ts";
 import { FeedbackRouter } from "./feedback-router.ts";
-import { Logger, LogLevel } from "./logger.ts";
+import { Logger } from "./logger.ts";
 import type { ServerLock } from "./server-lock.ts";
 import type { SlashReply } from "./slash-request.ts";
 
@@ -75,7 +75,7 @@ export class EmoteAddPreviews {
         return nextStep ? { ...message, text: `${message.text} Run \`/${pending.commandPath}\` again ${nextStep}` } : message;
       }));
     } catch (error) {
-      Logger.write(LogLevel.error, `/${pending.commandPath} confirmation failed in ${pending.serverId}:`, error);
+      Logger.error(`/${pending.commandPath} confirmation failed in ${pending.serverId}:`, error);
       reply = `Something went wrong. Run \`/${pending.commandPath}\` again to retry.`;
     }
     await request.reply(reply);

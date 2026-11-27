@@ -1,4 +1,4 @@
-export enum LogLevel {
+enum LogLevel {
   debug,
   info,
   warn,
@@ -7,7 +7,23 @@ export enum LogLevel {
 
 /** Strings in the message position are display text. Pass caught values separately. */
 export class Logger {
-  public static write(level: LogLevel, message: string | object, ...data: unknown[]): void {
+  public static debug(message: string | object, ...data: unknown[]): void {
+    Logger.write(LogLevel.debug, message, data);
+  }
+
+  public static info(message: string | object, ...data: unknown[]): void {
+    Logger.write(LogLevel.info, message, data);
+  }
+
+  public static warn(message: string | object, ...data: unknown[]): void {
+    Logger.write(LogLevel.warn, message, data);
+  }
+
+  public static error(message: string | object, ...data: unknown[]): void {
+    Logger.write(LogLevel.error, message, data);
+  }
+
+  private static write(level: LogLevel, message: string | object, data: unknown[]): void {
     const configured = process.env.LOG_LEVEL;
     const minimum = configured === "debug" || configured === "warn" || configured === "error" ? LogLevel[configured] : LogLevel.info;
     if (level < minimum) return;
