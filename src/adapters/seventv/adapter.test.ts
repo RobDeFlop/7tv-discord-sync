@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { InvalidLinkError } from "../../domain/index.ts";
 import { FakeImagePipeline } from "../../testing/fakes.ts";
-import { SevenTvAdapter } from "./adapter.ts";
+import { SevenTvAdapter, SevenTvSearchError } from "./adapter.ts";
 import { SevenTvFixtures as fx } from "./fixtures.ts";
 
 type Route = (url: string, init?: RequestInit) => Response | undefined;
@@ -81,6 +81,31 @@ describe("lookups", () => {
     const { adapter } = setup({ [`${API}/emote-sets/${fx.SET_ID}`]: 500 });
     await expect(adapter.getSet(fx.SET_ID)).rejects.toThrow();
   });
+});
+
+describe("exact name search", () => {
+  test("requests name-only all-time popularity and takes the first case-insensitive exact name in ranked order", async () => {
+    const items = ["PogChamp", "P.o.g", "pOG", "Pog"].map((name, i) => ({ name, id: `e${i}` }));
+    const { adapter, calls } = setup({ [`${API}/gql`]: { data: { emotes: { count: items.length, items } } } });
+    expect(await adapter.findEmoteByExactName("Pog")).toEqual({ id: "e2", name: "pOG", animated: false });
+    expect(calls[0]?.body).toMatchObject({ variables: {
+      query: "Pog", sort: { value: "popularity", order: "DESCENDING" },
+      filter: { category: "TOP", exact_match: true, case_sensitive: false, ignore_tags: true },
+    } });
+  });
+
+  test("partial and punctuation variants alone do not match", async () => {
+    const items = [{ name: "Cat-Jam", id: "1" }, { name: "CatJamming", id: "2" }];
+    const { adapter } = setup({ [`${API}/gql`]: { data: { emotes: { count: 2, items } } } });
+    expect(await adapter.findEmoteByExactName("catjam")).toBeNull();
+  });
+
+  test.each([503, { errors: [{ message: "unavailable" }], data: { emotes: { items: [] } } }, {}])(
+    "failed searches are not empty results (%p)", async (response) => {
+      const { adapter } = setup({ [`${API}/gql`]: response });
+      await expect(adapter.findEmoteByExactName("Pog")).rejects.toBeInstanceOf(SevenTvSearchError);
+    },
+  );
 });
 
 describe("trending", () => {

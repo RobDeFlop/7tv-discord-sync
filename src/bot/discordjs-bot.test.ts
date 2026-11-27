@@ -34,6 +34,38 @@ test("DiscordJsSlashRequest sends the queue confirmation as an ephemeral deferre
   expect(interaction.editReply).toHaveBeenCalledWith({ embeds: [embed] });
 });
 
+test("/search defers privately and renders the matched catalog emote with confirmation controls", async () => {
+  const discord = new FakeDiscord();
+  discord.addServer("server");
+  const sevenTv = new FakeSevenTv();
+  sevenTv.addEmote({ id: "e1", name: "Kappa", animated: false });
+  const store = new FakeStore();
+  const core = new SyncCore(sevenTv, discord, store);
+  const lock = new ServerLock();
+  const log = DiscordBot.logChannel({} as Client);
+  const events = new GatewayEvents(core, store, new FeedbackRouter(store, log), lock, new FakeServers());
+  const registry = new SlashCommandRegistry(core, lock, events, log);
+  const interaction = {
+    commandName: "search",
+    options: { getSubcommand: () => null, get: () => ({ value: "kappa" }) },
+    guildId: "server",
+    user: { id: "admin" },
+    memberPermissions: new PermissionsBitField(PermissionFlagsBits.Administrator),
+    appPermissions: new PermissionsBitField(PermissionFlagsBits.EmbedLinks),
+    deferred: false,
+    deferReply: mock(async () => { interaction.deferred = true; }),
+    editReply: mock(async (_options: InteractionEditReplyOptions) => {}),
+  };
+  await registry.handle(new DiscordJsSlashRequest(interaction as unknown as ChatInputCommandInteraction));
+  expect(interaction.deferReply).toHaveBeenCalledWith({ flags: MessageFlags.Ephemeral });
+  const reply = interaction.editReply.mock.calls[0]![0];
+  expect(reply.embeds).toMatchObject([{ image: { url: "attachment://preview.png" }, fields: [
+    { value: "Kappa" }, { value: "https://7tv.app/emotes/e1" },
+  ] }]);
+  expect(reply.components).toHaveLength(1);
+  expect(discord.emojis("server")).toEqual([]);
+});
+
 test("DiscordBot sends log embeds to the configured channel without mentions", async () => {
   const send = mock(async () => {});
   const channel = { isSendable: () => true, send };

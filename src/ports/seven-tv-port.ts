@@ -25,6 +25,7 @@ export abstract class SevenTvPort {
 
   /** Throws InvalidLinkError. */
   public abstract resolveEmoteLink(link: string): Promise<SevenTvEmote>;
+  public abstract findEmoteByExactName(name: string): Promise<SevenTvEmote | null>;
   /** Throws InvalidLinkError. */
   public abstract resolveUserLink(link: string): Promise<SevenTvUser>;
   public abstract getUser(id: SevenTvUserId): Promise<SevenTvUser | null>;
@@ -45,6 +46,10 @@ export abstract class SevenTvPort {
       if (!this.listeners.delete(listener)) return;
       if (this.listeners.size === 0) this.onNoListeners();
     };
+  }
+
+  protected matchesExactName(candidate: string, query: string): boolean {
+    return candidate.toLowerCase() === query.toLowerCase();
   }
 
   /** Tell every subscriber about a change. */

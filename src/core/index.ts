@@ -21,7 +21,7 @@ import type { SyncedServer } from "./synced-server.ts";
 
 export * from "./commands/index.ts";
 
-type EmoteAddPreparation =
+export type EmoteAddPreparation =
   | ({ emote: SevenTvEmote; previewImage: EmojiImage } & (
     | { prepared: PreparedEmoteAdd; slotNotice?: string }
     | { importFailure: "too-large" }
@@ -43,7 +43,21 @@ export class SyncCore {
 
   /** Prepare an emote preview without saving state or changing any Discord emojis. */
   public async prepareEmoteAdd(server: ServerId, link: string): Promise<EmoteAddPreparation> {
-    const emote = await this.context.sevenTv.resolveEmoteLink(link);
+    return this.prepareResolvedEmote(server, await this.context.sevenTv.resolveEmoteLink(link));
+  }
+
+  public async prepareEmoteSearch(server: ServerId, name: string): Promise<EmoteAddPreparation> {
+    let emote: SevenTvEmote | null;
+    try {
+      emote = await this.context.sevenTv.findEmoteByExactName(name);
+    } catch {
+      return { feedback: { level: "error", text: "Could not search 7TV. Try again in a moment." } };
+    }
+    if (!emote) return { feedback: { level: "info", text: "No exact emote name matched your search on 7TV." } };
+    return this.prepareResolvedEmote(server, emote);
+  }
+
+  private async prepareResolvedEmote(server: ServerId, emote: SevenTvEmote): Promise<EmoteAddPreparation> {
     const synced = await this.context.load(server);
     const managed = synced.state.findManaged(emote.id);
     const existing = managed ? synced.emojiOf(managed) : undefined;

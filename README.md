@@ -83,6 +83,7 @@ A typical first setup:
 
 | Command | What it does |
 | --- | --- |
+| `/search <name>` | Preview the highest-ranked exact name match in the public 7TV catalog, then confirm to import |
 | `/emote add <link>` | Preview a 7TV emote, then add it as a Requested Emote |
 | `/emote remove <name>` | Remove an emoji the bot created |
 | `/set link <7tv user link>` | Mirror that user's active emote set (Source Set) |
@@ -92,7 +93,7 @@ A typical first setup:
 | `/status` | Slot usage, settings, problems and pending Discord writes |
 | `/config log-channel <channel>` | Where automatic sync messages are posted |
 
-In the private emote preview, choose **Add** to use the displayed name, **Choose name** to edit the original 7TV name and add on submission, or **Cancel** to leave without adding anything. Names must be 2–32 characters and use only letters (A–Z), numbers, and underscores. The suggested name may already include a numeric suffix. If your custom name is taken, or the displayed name becomes taken before confirmation, the bot rejects it rather than adding a suffix. If the preview expires, run `/emote add` again.
+In the private emote preview, choose **Add** to use the displayed name, **Choose name** to edit the original 7TV name and add on submission, or **Cancel** to leave without adding anything. Names must be 2–32 characters and use only letters (A–Z), numbers, and underscores. The suggested name may already include a numeric suffix. If your custom name is taken, or the displayed name becomes taken before confirmation, the bot rejects it rather than adding a suffix. If the preview expires, repeat `/emote add` or `/search`.
 
 When an oversized image cannot be imported, the private preview explains Discord's 256 KB limit without adding a problem to `/status`.
 
@@ -101,7 +102,7 @@ When an oversized image cannot be imported, the private preview explains Discord
 Discord limits static and animated emojis separately (50, 100, 150 or 250 each, depending on boost level). When slots run out, they go in this order:
 
 1. Emojis you uploaded yourself (never changed by the bot)
-2. Emotes added with `/emote add`
+2. Emotes added with `/emote add` or `/search`
 3. The mirrored 7TV set
 4. Trending emotes
 

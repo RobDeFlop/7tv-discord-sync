@@ -238,6 +238,11 @@ export class FakeSevenTv extends SevenTvPort {
     return { ...emote };
   }
 
+  public async findEmoteByExactName(name: string): Promise<SevenTvEmote | null> {
+    const match = [...this.emotes.values()].find((emote) => this.matchesExactName(emote.name, name));
+    return match ? { ...match } : null;
+  }
+
   public async resolveUserLink(link: string): Promise<SevenTvUser> {
     const id = /^https:\/\/7tv\.app\/users\/([\w-]+)$/.exec(link)?.[1];
     const user = id ? this.users.get(id) : undefined;
