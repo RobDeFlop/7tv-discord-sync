@@ -1,3 +1,4 @@
+import type { APIEmbed } from "discord.js";
 import { ConfigureLogChannelCommand } from "../../core/index.ts";
 import type { ServerId } from "../../domain/index.ts";
 import { SlashCommand, type SlashOption } from "../slash-command.ts";
@@ -11,7 +12,7 @@ export class ConfigLogChannelSlashCommand extends SlashCommand {
     { name: "channel", description: "Text channel for sync messages", type: "channel", required: true },
   ];
 
-  protected run(server: ServerId, request: SlashRequest): Promise<string> {
+  protected run(server: ServerId, request: SlashRequest): Promise<APIEmbed> {
     return this.apply(server, new ConfigureLogChannelCommand(this.requiredString(request, "channel")));
   }
 }

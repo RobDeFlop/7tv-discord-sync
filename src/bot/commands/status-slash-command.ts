@@ -1,6 +1,7 @@
 import { escapeMarkdown, type APIEmbed, type APIEmbedField } from "discord.js";
 import type { SyncCore } from "../../core/index.ts";
 import type { Problem, ServerId, ServerStatus, TierUsage, WriteQueueProgress } from "../../domain/index.ts";
+import { EmbedStyle } from "../embed-style.ts";
 import { FeedbackRouter, type LogChannel } from "../feedback-router.ts";
 import { SlashCommand } from "../slash-command.ts";
 
@@ -36,30 +37,28 @@ export class StatusSlashCommand extends SlashCommand {
       actions.push("Review the sync problems below.");
     }
 
-    return {
+    const user = status.linkedUserId;
+    // Inline fields lay out in rows of three: slot usage and the queue, then the settings.
+    return EmbedStyle.card({
+      tone: actions.length ? "warning" : "success",
       title: actions.length ? "Action needed" : "No action needed",
-      ...(actions.length ? { description: actions.join("\n") } : {}),
+      description: actions.map((action) => `• ${action}`).join("\n"),
       fields: [
         StatusSlashCommand.usage("Static Slots", status.quotas.static),
         StatusSlashCommand.usage("Animated Slots", status.quotas.animated),
-        {
-          name: "Settings",
-          value: [
-            `Linked 7TV user: ${status.linkedUserId ?? "Not linked"}`,
-            `Trending Fill: ${status.trending.enabled ? "On" : "Off"} (${status.trending.period})`,
-            `Log channel: ${channel ?? "Not set"}`,
-          ].join("\n"),
-        },
-        { name: "Write queue", value: StatusSlashCommand.queue(status.writeQueue) },
+        { name: "Write queue", value: StatusSlashCommand.queue(status.writeQueue), inline: true },
+        { name: "Linked 7TV user", value: user ? `[${user}](https://7tv.app/users/${user})` : "Not linked", inline: true },
+        { name: "Trending Fill", value: `${status.trending.enabled ? "On" : "Off"} · ${status.trending.period}`, inline: true },
+        { name: "Log channel", value: channel ?? "Not set", inline: true },
         ...(status.lastSync ? [{ name: "Latest sync", value: StatusSlashCommand.latestSync(status.lastSync) }] : []),
         ...(status.problems.length ? [{ name: "Problems", value: StatusSlashCommand.problems(status.problems) }] : []),
       ],
-    };
+    });
   }
 
   private static latestSync(last: NonNullable<ServerStatus["lastSync"]>): string {
-    const lines = [`${last.changeCount} emoji changes.`];
-    if (last.retryAt !== undefined) lines.push(`Resume scheduled <t:${Math.floor(last.retryAt / 1000)}:R>.`);
+    const lines = [`**${last.changeCount}** emoji ${last.changeCount === 1 ? "change" : "changes"}.`];
+    if (last.retryAt !== undefined) lines.push(`Resume scheduled ${EmbedStyle.relativeTime(last.retryAt)}.`);
     if (last.feedback.length) lines.push(FeedbackRouter.format(last.feedback));
     return lines.join("\n").slice(0, StatusSlashCommand.MAX_FIELD_VALUE).toWellFormed();
   }
@@ -70,7 +69,7 @@ export class StatusSlashCommand extends SlashCommand {
       name,
       inline: true,
       value: [
-        `${used}/${used + free} used`,
+        `${EmbedStyle.bar(used, used + free)} **${used}**/${used + free}`,
         `Reserved Slots: ${byTier.reserved}`,
         `Requested Emotes: ${byTier.requested}`,
         `Source Set: ${byTier.source}`,
@@ -83,7 +82,7 @@ export class StatusSlashCommand extends SlashCommand {
     if (pending === 0) return "Idle";
     const base = `${pending} ${pending === 1 ? "write" : "writes"} pending`;
     if (retryingAt === null) return base;
-    return `${base}. Rate limited by Discord; retrying <t:${Math.floor(retryingAt / 1000)}:R>.`;
+    return `${base}. Rate limited by Discord; retrying ${EmbedStyle.relativeTime(retryingAt)}.`;
   }
 
   private static problems(problems: ReadonlyArray<Problem>): string {

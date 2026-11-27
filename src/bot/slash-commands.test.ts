@@ -4,6 +4,7 @@ import { Command, SyncCore } from "../core/index.ts";
 import type { ServerId } from "../domain/index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore, MAX_EMOJI_BYTES } from "../testing/fakes.ts";
 import { EmoteAddInteraction, type EmoteAddAction, type EmoteAddPreview } from "./emote-add-interaction.ts";
+import { DetailedSlashReply } from "./detailed-slash-reply.ts";
 import { FeedbackRouter } from "./feedback-router.ts";
 import { GatewayEvents } from "./gateway-events.ts";
 import { FakeLogChannel, FakeServers } from "../testing/bot-fakes.ts";
@@ -16,6 +17,7 @@ const EMOTE_LINK = "https://7tv.app/emotes/e1";
 class FakeRequest extends SlashRequest {
   private readonly replyHistory: SlashReply[] = [];
   private readonly editHistory: string[] = [];
+  private readonly editCards: APIEmbed[] = [];
   public editError?: Error;
   public deferred = false;
   public readonly userId = "admin";
@@ -42,9 +44,14 @@ class FakeRequest extends SlashRequest {
     this.replyHistory.push(structuredClone(reply));
   }
 
-  public async editOriginal(text: string): Promise<void> {
+  public async editOriginal(embed: APIEmbed): Promise<void> {
     if (this.editError) throw this.editError;
-    this.editHistory.push(text);
+    this.editCards.push(structuredClone(embed));
+    this.editHistory.push(new DetailedSlashReply(embed).text());
+  }
+
+  public get editEmbeds(): readonly APIEmbed[] {
+    return structuredClone(this.editCards);
   }
 
   public get edits(): readonly string[] {
@@ -56,16 +63,17 @@ class FakeRequest extends SlashRequest {
   }
 
   public get preview(): EmoteAddPreview | undefined {
-    return this.replies.find((reply) => typeof reply !== "string" && "originalName" in reply);
+    return this.replies.find((reply) => "originalName" in reply);
   }
 
+  /** Card replies as the text fallback reads; previews are left out. */
   public get text(): string {
-    return this.replyHistory.filter((reply) => typeof reply === "string").join("\n");
+    return this.replyHistory.flatMap((reply) => "originalName" in reply ? [] : [new DetailedSlashReply(reply).text()]).join("\n");
   }
 
   public get embed(): APIEmbed {
     const [reply] = this.replies;
-    if (!reply || typeof reply === "string" || "originalName" in reply || this.replyHistory.length !== 1) {
+    if (!reply || "originalName" in reply || this.replyHistory.length !== 1) {
       throw new Error("Expected one embed reply");
     }
     return reply;
@@ -73,7 +81,7 @@ class FakeRequest extends SlashRequest {
 }
 
 class FakeEmoteAddInteraction extends EmoteAddInteraction {
-  public text = "";
+  public embed?: APIEmbed;
   public formValue?: string;
   public deferred = false;
 
@@ -95,8 +103,12 @@ class FakeEmoteAddInteraction extends EmoteAddInteraction {
     this.deferred = true;
   }
 
-  public async reply(text: string): Promise<void> {
-    this.text = text;
+  public async reply(embed: APIEmbed): Promise<void> {
+    this.embed = structuredClone(embed);
+  }
+
+  public get text(): string {
+    return this.embed ? new DetailedSlashReply(this.embed).text() : "";
   }
 }
 
@@ -112,7 +124,7 @@ test("FakeRequest snapshots embed replies and returns independent copies", async
   expect(replies).toEqual(expected);
 
   const recordedEmbed = replies[0];
-  if (!recordedEmbed || typeof recordedEmbed === "string" || "originalName" in recordedEmbed) {
+  if (!recordedEmbed || "originalName" in recordedEmbed) {
     throw new Error("Expected an embed reply");
   }
   recordedEmbed.footer!.text = "Changed returned footer";
@@ -208,10 +220,12 @@ describe("/search", () => {
   test("no match and failed lookups give distinct text replies without previews", async () => {
     const { sevenTv, run } = setup();
     const missing = await run("search", { name: "Po" });
-    expect(missing.replies).toEqual([expect.stringContaining("No exact emote name matched")]);
+    expect(missing.preview).toBeUndefined();
+    expect(missing.embed.description).toContain("No exact emote name matched");
     spyOn(sevenTv, "findEmoteByExactName").mockRejectedValueOnce(new Error("offline"));
     const failure = await run("search", { name: "Pog" });
-    expect(failure.replies).toEqual([expect.stringContaining("Could not search 7TV")]);
+    expect(failure.preview).toBeUndefined();
+    expect(failure.embed.description).toContain("Could not search 7TV");
   });
 });
 
@@ -278,11 +292,11 @@ describe("commands translate to core calls", () => {
     await run("config log-channel", { channel: "log" });
     const invalid = await run("set link", { link: "nope" });
     const link = await run("set link", { link: "https://7tv.app/users/u1" });
-    expect(link.embed.title).toBe("Sync queued");
+    expect(link.embed.title).toBe("⏳ Sync queued");
     await events.idle();
     expect(invalid.edits.at(-1)).toContain("not a valid 7TV");
     expect(link.edits.at(-1)).toContain("Linked streamer");
-    expect(link.edits.at(-1)).toContain("Added Pog.");
+    expect(link.editEmbeds.at(-1)?.fields).toEqual([{ name: "➕ Added (1)", value: "`Pog`", inline: true }]);
     expect(log.sent).toEqual([]);
     expect(discord.emojis(S).map((e) => e.name)).toEqual(["Pog"]);
     await run("set unlink", { emotes: "delete" });
@@ -338,9 +352,9 @@ describe("commands translate to core calls", () => {
     try {
       discord.setQueueProgress(S, { pending: 1, retryingAt: null });
       const replies = await Promise.race([requests, Bun.sleep(150).then(() => null)]);
-      expect(replies?.[0]?.embed.fields).toContainEqual({ name: "Write queue", value: "1 write pending" });
+      expect(replies?.[0]?.embed.fields).toContainEqual({ name: "Write queue", value: "1 write pending", inline: true });
       for (const reply of replies?.slice(1) ?? []) {
-        expect(reply.embed.title).toBe("Sync queued");
+        expect(reply.embed.title).toBe("⏳ Sync queued");
         expect(reply.edits).toHaveLength(0);
       }
       expect(discord.emojis(S)).toEqual([]);
@@ -380,12 +394,12 @@ describe("commands translate to core calls", () => {
     const list = spyOn(discord, "listEmojis");
     try {
       const [first, second] = await Promise.all([run("sync"), run("sync")]);
-      expect(first.embed.title).toBe("Sync queued");
-      expect(second.embed.title).toBe("Sync queued");
+      expect(first.embed.title).toBe("⏳ Sync queued");
+      expect(second.embed.title).toBe("⏳ Sync queued");
       gate.resolve();
       await busy;
       await events.idle();
-      expect(first.edits).toEqual(["Sync complete: 0 emoji changes."]);
+      expect(first.editEmbeds).toMatchObject([{ title: "✅ Sync complete", description: "Everything is already up to date." }]);
       expect(second.edits).toEqual(first.edits);
       expect(list).toHaveBeenCalledTimes(2); // the blocking Command and one reconcile
     } finally {
@@ -445,9 +459,15 @@ describe("commands translate to core calls", () => {
     await observer(S, { kind: "finished", result: {
       changes: [], feedback: [{ level: "info", text: "Sync resumed after Discord's rate limit." }, ...details],
     } });
-    for (const [index, notice] of ["Sync paused", "Sync resumed"].entries()) {
-      expect(request.edits[index]).toContain(notice);
-      expect(request.edits[index]).toContain("Some details were omitted");
+    const [paused, resumed] = request.editEmbeds;
+    expect(paused?.title).toBe("⏸️ Sync paused");
+    expect(resumed?.title).toBe("⚠️ Sync finished with warnings");
+    for (const [index, notice] of ["Sync paused by", "Sync resumed after"].entries()) {
+      const description = request.editEmbeds[index]?.description ?? "";
+      expect(description).toContain(notice);
+      expect(description).toMatch(/\n…and \d+ more(\n|$)/);
+      expect(description.length).toBeLessThanOrEqual(4096);
+      // Without Embed Links the same card still fits one message.
       expect(request.edits[index]?.length).toBeLessThanOrEqual(2000);
     }
     expect(log.sent).toEqual([]);
@@ -469,7 +489,7 @@ describe("commands translate to core calls", () => {
     await events.idle();
     const valid = JSON.stringify(log.sent);
     expect(valid).toContain("Linked streamer");
-    expect(valid).toContain("Added Pog.");
+    expect(valid).toContain("{\"name\":\"➕ Added (1)\",\"value\":\"`Pog`\",\"inline\":true}");
   });
 
   test("without a log channel a /sync problem is recorded for /status but not posted", async () => {
@@ -483,14 +503,14 @@ describe("commands translate to core calls", () => {
     await events.idle();
     expect(log.sent).toEqual([]);
     const { embed } = await run("status");
-    expect(embed.title).toBe("Action needed");
+    expect(embed.title).toBe("⚠️ Action needed");
     expect(embed.fields).toContainEqual({ name: "Problems", value: "- Big could not be downloaded from 7TV." });
   });
 
-  test("/config log-channel stores the channel and confirms with text", async () => {
+  test("/config log-channel stores the channel and confirms with a success card", async () => {
     const { core, run } = setup();
     const req = await run("config log-channel", { channel: "chan-9" });
-    expect(req.replies).toEqual(["Log channel updated."]);
+    expect(req.embed).toMatchObject({ title: "✅ Done", description: "Log channel updated." });
     expect((await core.status(S)).logChannelId).toBe("chan-9");
   });
 });
@@ -500,12 +520,14 @@ describe("/status", () => {
     const { run } = setup();
     const request = await run("status");
     expect(request.deferred).toBe(true);
-    expect(request.embed.title).toBe("No action needed");
-    expect(request.embed.fields).toContainEqual({
-      name: "Settings",
-      value: "Linked 7TV user: Not linked\nTrending Fill: Off (week)\nLog channel: Not set",
-    });
-    expect(request.embed.fields).toContainEqual({ name: "Write queue", value: "Idle" });
+    expect(request.embed.title).toBe("✅ No action needed");
+    expect(request.embed.fields?.slice(2).map((field) => [field.name, field.value])).toEqual([
+      ["Write queue", "Idle"],
+      ["Linked 7TV user", "Not linked"],
+      ["Trending Fill", "Off · week"],
+      ["Log channel", "Not set"],
+    ]);
+    expect(request.embed.fields?.[0]?.value).toStartWith("▱▱▱▱▱▱▱▱▱▱ **0**/50");
     expect(request.embed.fields?.some((field) => field.name === "Problems")).toBe(false);
   });
 
@@ -513,7 +535,7 @@ describe("/status", () => {
     const { discord, run } = setup();
     discord.revokeManageExpressions(S);
     const { embed } = await run("status");
-    expect(embed.title).toBe("Action needed");
+    expect(embed.title).toBe("⚠️ Action needed");
     expect(embed.description).toContain("Missing **Manage Expressions**");
     expect(embed.description).toContain("`/sync`");
   });
@@ -534,13 +556,16 @@ describe("/status", () => {
     discord.setQueueProgress(S, { pending: 4, retryingAt: 2_000_000_030_500 });
 
     const { embed } = await run("status");
-    expect(embed.title).toBe("No action needed");
+    expect(embed.title).toBe("✅ No action needed");
     expect(embed.fields?.map((field) => [field.name, field.value])).toEqual([
-      ["Static Slots", "3/50 used\nReserved Slots: 1\nRequested Emotes: 0\nSource Set: 1\nTrending Fill: 1"],
-      ["Animated Slots", "1/50 used\nReserved Slots: 0\nRequested Emotes: 1\nSource Set: 0\nTrending Fill: 0"],
-      ["Settings", "Linked 7TV user: u1\nTrending Fill: On (month)\nLog channel: <#1234>"],
+      ["Static Slots", "▰▱▱▱▱▱▱▱▱▱ **3**/50\nReserved Slots: 1\nRequested Emotes: 0\nSource Set: 1\nTrending Fill: 1"],
+      // Any use shows at least one filled segment.
+      ["Animated Slots", "▰▱▱▱▱▱▱▱▱▱ **1**/50\nReserved Slots: 0\nRequested Emotes: 1\nSource Set: 0\nTrending Fill: 0"],
       ["Write queue", "4 writes pending. Rate limited by Discord; retrying <t:2000000030:R>."],
-      ["Latest sync", expect.stringMatching(/\d+ emoji changes\./)],
+      ["Linked 7TV user", "[u1](https://7tv.app/users/u1)"],
+      ["Trending Fill", "On · month"],
+      ["Log channel", "<#1234>"],
+      ["Latest sync", expect.stringMatching(/\*\*\d+\*\* emoji changes?\./)],
     ]);
   });
 
@@ -550,7 +575,7 @@ describe("/status", () => {
     await run("set link", { link: "https://7tv.app/users/u1" });
     await events.idle();
     const { embed } = await run("status");
-    expect(embed.title).toBe("No action needed");
+    expect(embed.title).toBe("✅ No action needed");
     expect(embed.fields?.find((field) => field.name === "Problems")?.value).toContain("Pog");
   });
 
@@ -564,7 +589,7 @@ describe("/status", () => {
     await store.save(S, state);
 
     const { embed } = await run("status");
-    expect(embed.title).toBe("Action needed");
+    expect(embed.title).toBe("⚠️ Action needed");
     const value = embed.fields?.find((field) => field.name === "Problems")?.value ?? "";
     expect(value.length).toBeLessThanOrEqual(1024);
     const entries = value.split("\n");

@@ -1,3 +1,4 @@
+import type { APIEmbed } from "discord.js";
 import { FeedbackRouter } from "../feedback-router.ts";
 import type { ServerId } from "../../domain/index.ts";
 import { SlashCommand, type SlashOption } from "../slash-command.ts";
@@ -11,8 +12,8 @@ export class EmoteRemoveSlashCommand extends SlashCommand {
     { name: "name", description: "Emoji name", type: "string", required: true },
   ];
 
-  protected override async run(server: ServerId, request: SlashRequest): Promise<string> {
+  protected override async run(server: ServerId, request: SlashRequest): Promise<APIEmbed> {
     const { feedback } = await this.core.removeEmote(server, this.requiredString(request, "name"));
-    return FeedbackRouter.format(feedback);
+    return FeedbackRouter.card(feedback);
   }
 }

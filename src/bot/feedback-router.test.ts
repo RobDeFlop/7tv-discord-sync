@@ -1,4 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
+import type { APIEmbed } from "discord.js";
+import type { Change } from "../domain/index.ts";
 import { FakeLogChannel } from "../testing/bot-fakes.ts";
 import { SyncCore } from "../core/index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
@@ -48,14 +50,70 @@ test("FeedbackRouter keeps all severities visible within the combined embed text
   });
 
   expect(log.sent).toHaveLength(1);
-  const embeds = log.sent[0]!.embeds;
-  expect(embeds.map((embed) => embed.title)).toEqual(["Sync results", "Sync warnings", "Sync errors"]);
-  expect(embeds[0]?.description).toEndWith("…");
-  expect(embeds[1]?.description).toEndWith("…");
-  expect(embeds[2]?.description).toBe("Could not finish syncing.");
-  expect(embeds.reduce((total, embed) => total + (embed.title?.length ?? 0) + (embed.description?.length ?? 0), 0))
-    .toBeLessThanOrEqual(6000);
+  const [embed] = log.sent[0]!.embeds;
+  expect(embed).toMatchObject({ title: "❌ Couldn't complete that", color: 0xed4245 });
+  const [error, warning, info] = embed?.description?.split("\n") ?? [];
+  expect(error).toBe("❌ Could not finish syncing.");
+  expect(warning).toStartWith("⚠️ xxx");
+  expect(warning).toEndWith("…");
+  expect(info).toStartWith("xxx");
+  expect(info).toEndWith("…");
+  expect(FeedbackRouterTest.textLength(embed)).toBeLessThanOrEqual(6000);
 
   await router.deliver(server, { changes: [], feedback: [{ level: "info", text: longText }] });
-  expect(log.sent[1]?.embeds[0]?.description).toHaveLength(4096);
+  expect(log.sent[1]?.embeds[0]?.description?.length).toBeLessThanOrEqual(4096);
+  expect(log.sent[1]?.embeds[0]?.description).toEndWith("…");
 });
+
+test("a sync card groups changes by kind and fits a large sync within Discord's limits", async () => {
+  const store = new FakeStore();
+  const log = new FakeLogChannel();
+  const router = new FeedbackRouter(new SyncCore(new FakeSevenTv(), new FakeDiscord(), store), log);
+  const state = await store.load("server");
+  state.setLogChannel("log");
+  await store.save("server", state);
+  const added = Array.from({ length: 300 }, (_, i): Change => ({
+    type: "created", name: `Emote_${i}`, animated: false, sevenTvEmoteId: `e${i}`, tier: "source",
+  }));
+  const changes: Change[] = [
+    ...added,
+    { type: "deleted", name: "Old", reason: "removed" },
+    { type: "renamed", from: "Pog", to: "Pog~1" },
+    { type: "reserved", name: "hand" },
+  ];
+
+  await router.deliverUpdate("server", { kind: "finished", result: { changes, feedback: [{ level: "warning", text: "Big was skipped." }] } });
+
+  const [embed] = log.sent[0]?.embeds ?? [];
+  expect(embed).toMatchObject({
+    color: 0xf0b232,
+    title: "⚠️ Sync finished with warnings",
+    description: "**303** emoji changes.\n\nBig was skipped.",
+    footer: { text: "7TV Discord Sync" },
+  });
+  expect(embed?.fields?.map(({ name }) => name)).toEqual([
+    "➕ Added (300)", "➖ Removed (1)", "📌 Kept as Reserved Slots (1)", "✏️ Renamed (1)",
+  ]);
+  expect(embed?.fields?.[0]?.value).toStartWith("`Emote_0`, `Emote_1`");
+  expect(embed?.fields?.[0]?.value).toMatch(/, …and \d+ more$/);
+  expect(embed?.fields?.[3]).toEqual({ name: "✏️ Renamed (1)", value: "`Pog` → `Pog~1`", inline: false });
+  expect(FeedbackRouterTest.textLength(embed)).toBeLessThanOrEqual(6000);
+});
+
+test("a background sync that changed nothing posts nothing", async () => {
+  const store = new FakeStore();
+  const log = new FakeLogChannel();
+  const router = new FeedbackRouter(new SyncCore(new FakeSevenTv(), new FakeDiscord(), store), log);
+  const state = await store.load("server");
+  state.setLogChannel("log");
+  await store.save("server", state);
+  await router.deliverUpdate("server", { kind: "finished", result: { changes: [], feedback: [] } });
+  expect(log.sent).toEqual([]);
+});
+
+class FeedbackRouterTest {
+  public static textLength(embed: APIEmbed | undefined): number {
+    const fields = (embed?.fields ?? []).reduce((total, field) => total + field.name.length + field.value.length, 0);
+    return (embed?.title?.length ?? 0) + (embed?.description?.length ?? 0) + (embed?.footer?.text.length ?? 0) + fields;
+  }
+}

@@ -17,6 +17,7 @@ import {
   type ModalSubmitInteraction,
 } from "discord.js";
 import { DetailedSlashReply } from "./detailed-slash-reply.ts";
+import { EmbedStyle } from "./embed-style.ts";
 import type { ServerId } from "../domain/index.ts";
 import { EmoteAddInteraction, type EmoteAddAction, type EmoteAddPreview } from "./emote-add-interaction.ts";
 
@@ -49,17 +50,22 @@ export class DiscordJsEmoteAddInteraction extends EmoteAddInteraction {
 
   public static previewReply(preview: EmoteAddPreview, hasEmbedLinks: boolean): Pick<InteractionReplyOptions, "content" | "allowedMentions" | "embeds" | "files" | "components"> {
     const filename = preview.image.animated ? "preview.gif" : "preview.png";
-    const fields: APIEmbedField[] = [{ name: "Original 7TV name", value: escapeMarkdown(preview.originalName) }];
+    const blocked = preview.importError !== undefined;
+    const fields: APIEmbedField[] = [{ name: "Original 7TV name", value: escapeMarkdown(preview.originalName), inline: true }];
     if (preview.defaultName !== undefined && preview.defaultName !== preview.originalName) {
-      fields.push({ name: "Add as", value: escapeMarkdown(preview.defaultName) });
+      fields.push({ name: "Add as", value: escapeMarkdown(preview.defaultName), inline: true });
     }
-    fields.push({ name: "7TV emote", value: preview.emoteUrl });
-    const embed: APIEmbed = {
-      title: preview.importError !== undefined ? "Cannot import this emote" : "Confirm emote add",
-      description: preview.importError !== undefined ? preview.importError : preview.slotNotice,
+    fields.push({ name: "7TV emote", value: `[Open on 7TV](${preview.emoteUrl})`, inline: true });
+    // The title links to 7TV as well; the field keeps the link in the text fallback.
+    const embed = EmbedStyle.card({
+      tone: blocked ? "error" : "info",
+      icon: blocked ? undefined : "➕",
+      title: blocked ? "Cannot import this emote" : "Confirm emote add",
+      url: preview.emoteUrl,
+      description: preview.importError ?? preview.slotNotice,
       fields,
       image: { url: `attachment://${filename}` },
-    };
+    });
     const reply = {
       ...new DetailedSlashReply(embed).render(hasEmbedLinks),
       ...(hasEmbedLinks ? { files: [{ attachment: Buffer.from(preview.image.bytes), name: filename }] } : {}),
@@ -103,9 +109,10 @@ export class DiscordJsEmoteAddInteraction extends EmoteAddInteraction {
     await this.interaction.deferReply({ flags: MessageFlags.Ephemeral });
   }
 
-  public async reply(content: string): Promise<void> {
-    if (this.interaction.deferred) await this.interaction.editReply({ content });
-    else await this.interaction.reply({ content, flags: MessageFlags.Ephemeral });
+  public async reply(embed: APIEmbed): Promise<void> {
+    const options = new DetailedSlashReply(embed).render(this.interaction.appPermissions.has(PermissionFlagsBits.EmbedLinks));
+    if (this.interaction.deferred) await this.interaction.editReply(options);
+    else await this.interaction.reply({ ...options, flags: MessageFlags.Ephemeral });
   }
 
   private static customId(id: string, kind: EmoteAddAction["kind"]): string {

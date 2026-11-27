@@ -1,6 +1,7 @@
-import type { APIEmbed } from "discord.js";
+import type { APIEmbed, APIEmbedField } from "discord.js";
 import type { SyncCore, SyncObserver, SyncUpdate } from "../core/index.ts";
-import type { FeedbackMessage, ServerId, SyncResult } from "../domain/index.ts";
+import type { Change, FeedbackMessage, ServerId, SyncResult } from "../domain/index.ts";
+import { EmbedStyle, type EmbedCard } from "./embed-style.ts";
 import { Logger, LogLevel } from "./logger.ts";
 import type { SlashRequest } from "./slash-request.ts";
 
@@ -11,12 +12,12 @@ export abstract class LogChannel {
   public abstract send(channelId: string, embeds: ReadonlyArray<APIEmbed>): Promise<void>;
 }
 
-/** Formats feedback and routes background sync reports. */
+type CardHeading = Omit<EmbedCard, "description" | "fields">;
+
+/** Formats feedback as cards and routes background sync reports. */
 export class FeedbackRouter {
-  private static readonly MAX_EMBED_DESCRIPTION = 4096;
-  private static readonly MAX_TOTAL_EMBED_TEXT = 6000;
-  private static readonly MAX_PRIVATE_TEXT = 2000;
-  private static readonly MAX_PRIVATE_LINE = 350;
+  private static readonly MAX_CHANGE_LIST = 512;
+  private static readonly SEVERITY_ORDER = ["error", "warning", "info"] as const;
   // Discord interaction tokens expire after 15 minutes; leave a margin for request latency.
   private static readonly REPLY_WINDOW_MS = 14 * 60_000 + 55_000;
   private readonly delivered = new WeakMap<SyncUpdate, Promise<void>>();
@@ -26,20 +27,33 @@ export class FeedbackRouter {
     private readonly logChannel: LogChannel,
   ) {}
 
-  /** Command feedback is shown to the admin as an ephemeral reply. */
+  /** Feedback as plain lines, for a field inside another card. */
   public static format(feedback: ReadonlyArray<FeedbackMessage>): string {
     if (feedback.length === 0) return "Done.";
-    return feedback.map((f) => FeedbackRouter.line(f)).join("\n");
+    return feedback.map((message) => EmbedStyle.line(message)).join("\n");
+  }
+
+  /** One command's result; the most severe message sets the colour and title. */
+  public static card(feedback: ReadonlyArray<FeedbackMessage>): APIEmbed {
+    const tone = EmbedStyle.tone(feedback);
+    const title = tone === "error" ? "Couldn't complete that" : tone === "warning" ? "Done, with warnings" : "Done";
+    return FeedbackRouter.compose({ tone, title }, [], feedback);
+  }
+
+  /** An error card for a request the bot will not or could not carry out. */
+  public static refusal(text: string): APIEmbed {
+    return FeedbackRouter.card([{ level: "error", text }]);
   }
 
   /** Deliver every shared update to the log channel at most once if one or more replies need fallback. */
   public deliverUpdate(server: ServerId, update: SyncUpdate, privateFallback = false): Promise<void> {
     if (update.kind === "cancelled") return Promise.resolve();
+    const { changes, feedback } = update.result;
+    // A routine sync that changed nothing stays quiet; a reply that could not be edited is always answered.
+    if (!privateFallback && !changes.length && !feedback.length) return Promise.resolve();
     const existing = this.delivered.get(update);
     if (existing) return existing;
-    const result = { ...update.result, feedback: FeedbackRouter.updateFeedback(update, privateFallback) };
-    if (!result.feedback.length) return Promise.resolve();
-    const delivery = this.deliver(server, result);
+    const delivery = this.post(server, FeedbackRouter.syncCard(update, privateFallback));
     this.delivered.set(update, delivery);
     return delivery;
   }
@@ -57,10 +71,7 @@ export class FeedbackRouter {
     return async (server, update, setting) => {
       if (recipient && Date.now() < deadline) {
         try {
-          const feedback = FeedbackRouter.updateFeedback(update, true);
-          await recipient.editOriginal(FeedbackRouter.privateText([
-            ...feedback.slice(0, 2), ...(setting ?? []), ...feedback.slice(2),
-          ]));
+          await recipient.editOriginal(FeedbackRouter.syncCard(update, true, setting));
           return;
         } catch (error) {
           Logger.write(LogLevel.error, `sync_reply_edit_failed operation=edit_original server=${Logger.field(server)} ${Logger.failure(error)}`);
@@ -72,7 +83,7 @@ export class FeedbackRouter {
       await this.deliverUpdate(server, update, true);
       // The shared result is posted once, but settings can differ between two invocations.
       if (update.kind === "finished" && setting?.length) {
-        await this.deliver(server, { changes: [], feedback: [...setting] });
+        await this.post(server, FeedbackRouter.card(setting));
       }
     };
   }
@@ -80,73 +91,92 @@ export class FeedbackRouter {
   /** Feedback goes to the configured log channel if any; status is available regardless. */
   public async deliver(server: ServerId, result: SyncResult): Promise<void> {
     if (result.feedback.length === 0) return;
+    await this.post(server, FeedbackRouter.syncCard({ kind: "finished", result }, false));
+  }
+
+  private async post(server: ServerId, embed: APIEmbed): Promise<void> {
     let operation = "load_log_channel";
     try {
       const channelId = await this.core.logChannelId(server);
       if (!channelId) return;
       operation = "send_log_embed";
-      await this.logChannel.send(channelId, FeedbackRouter.embeds(result.feedback));
+      // Log posts are read later, so they carry when the sync happened; private replies already show it.
+      await this.logChannel.send(channelId, [{ ...embed, timestamp: new Date().toISOString() }]);
     } catch (error) {
       Logger.write(LogLevel.error, `feedback_delivery_failed operation=${operation} server=${Logger.field(server)} ${Logger.failure(error)}`);
     }
   }
 
-  private static updateFeedback(update: SyncUpdate, includeEmpty: boolean): FeedbackMessage[] {
-    const { changes, feedback } = update.result;
-    const failed = feedback.some((message) => message.level === "error");
-    if (update.kind === "cancelled" || (!changes.length && (!includeEmpty || failed))) return feedback;
-    const summary = update.kind === "paused" ? `${changes.length} emoji changes before the pause.`
-      : failed ? `Sync ended after ${changes.length} emoji changes.`
-      : `Sync complete: ${changes.length} emoji changes.`;
-    const details = changes.slice(0, 10).map((change): FeedbackMessage => {
-      const text = change.type === "created" ? `Added ${change.name}.`
-        : change.type === "deleted" ? `Removed ${change.name}.`
-        : change.type === "reserved" ? `Kept ${change.name} as a Reserved Slot.`
-        : `Renamed ${change.from} to ${change.to}.`;
-      return { level: "info", text };
-    });
-    return [{ level: "info", text: summary }, ...feedback, ...details];
-  }
-
-  private static privateText(feedback: readonly FeedbackMessage[]): string {
-    if (!feedback.length) return "Done.";
-    const lines = feedback.map((message) => FeedbackRouter.line(message));
-    const full = lines.join("\n");
-    if (full.length <= FeedbackRouter.MAX_PRIVATE_TEXT) return full;
-
-    const footer = "\nSome details were omitted. Check /status for recorded problems.";
-    const budget = FeedbackRouter.MAX_PRIVATE_TEXT - footer.length;
-    let text = "";
-    for (const line of lines) {
-      const detail = line.length > FeedbackRouter.MAX_PRIVATE_LINE
-        ? `${line.slice(0, FeedbackRouter.MAX_PRIVATE_LINE - 1).toWellFormed()}…`
-        : line;
-      const next = text ? `${text}\n${detail}` : detail;
-      if (next.length > budget) break;
-      text = next;
+  /**
+   * The outcome leads: title and colour, a one-line summary, then problems before routine notes.
+   * `summarizeEmpty` says "up to date" for a sync someone asked for; a background report omits it.
+   */
+  private static syncCard(update: SyncUpdate, summarizeEmpty: boolean, setting: readonly FeedbackMessage[] = []): APIEmbed {
+    const { changes } = update.result;
+    const feedback = [...setting, ...update.result.feedback];
+    const failed = feedback.some(({ level }) => level === "error");
+    const summarize = update.kind !== "cancelled" && (changes.length > 0 || (summarizeEmpty && !failed));
+    const count = `**${changes.length}** emoji ${changes.length === 1 ? "change" : "changes"}`;
+    const fields = FeedbackRouter.changeFields(changes);
+    if (update.kind === "cancelled") return FeedbackRouter.compose({ tone: "neutral", title: "Sync cancelled" }, fields, feedback);
+    if (failed) {
+      const heading: CardHeading = { tone: "error", title: changes.length ? "Sync stopped" : "Couldn't complete that" };
+      return FeedbackRouter.compose(heading, fields, feedback, summarize ? [`Stopped after ${count}.`] : []);
     }
-    return text + footer;
+    if (update.kind === "paused") {
+      const resume = `Resuming ${EmbedStyle.relativeTime(update.retryAt)}.`;
+      const lead = summarize ? `${count} so far. ${resume}` : resume;
+      return FeedbackRouter.compose({ tone: "warning", icon: "⏸️", title: "Sync paused" }, fields, feedback, [lead]);
+    }
+    const tone = EmbedStyle.tone(feedback);
+    const title = tone === "warning" ? "Sync finished with warnings" : "Sync complete";
+    // "Up to date" would contradict warnings about emotes that were skipped.
+    const empty = tone === "success" ? "Everything is already up to date." : "No emoji changes.";
+    const lead = !summarize ? [] : changes.length ? [`${count}.`] : [empty];
+    return FeedbackRouter.compose({ tone, title }, fields, feedback, lead);
   }
 
-  private static embeds(feedback: ReadonlyArray<FeedbackMessage>): APIEmbed[] {
-    const grouped: Record<FeedbackMessage["level"], string[]> = { info: [], warning: [], error: [] };
-    for (const { level, text } of feedback) grouped[level].push(text);
-    const sections = ([
-      ["Sync results", grouped.info],
-      ["Sync warnings", grouped.warning],
-      ["Sync errors", grouped.error],
-    ] as const).filter(([, lines]) => lines.length > 0);
-    // Share Discord's per-message embed limit so a long result cannot hide warnings or errors.
-    const budget = Math.floor(FeedbackRouter.MAX_TOTAL_EMBED_TEXT / sections.length);
-    return sections.map(([title, lines]) => {
-      const description = lines.join("\n");
-      const limit = Math.min(FeedbackRouter.MAX_EMBED_DESCRIPTION, budget - title.length);
-      return { title, description: description.length > limit ? `${description.slice(0, limit - 1)}…` : description };
-    });
+  private static changeFields(changes: ReadonlyArray<Change>): APIEmbedField[] {
+    const added: string[] = [];
+    const removed: string[] = [];
+    const reserved: string[] = [];
+    const renamed: string[] = [];
+    for (const change of changes) {
+      if (change.type === "created") added.push(`\`${change.name}\``);
+      else if (change.type === "deleted") removed.push(`\`${change.name}\``);
+      else if (change.type === "reserved") reserved.push(`\`${change.name}\``);
+      else renamed.push(`\`${change.from}\` → \`${change.to}\``);
+    }
+    const groups = [
+      ["➕ Added", added, ", "],
+      ["➖ Removed", removed, ", "],
+      ["📌 Kept as Reserved Slots", reserved, ", "],
+      ["✏️ Renamed", renamed, "\n"],
+    ] as const;
+    return groups.filter(([, items]) => items.length > 0).map(([name, items, separator]) => ({
+      name: `${name} (${items.length})`,
+      value: EmbedStyle.lines(items, FeedbackRouter.MAX_CHANGE_LIST, separator),
+      inline: separator !== "\n",
+    }));
   }
 
-  private static line(f: FeedbackMessage): string {
-    const prefix = f.level === "info" ? "" : f.level === "warning" ? "Warning: " : "Error: ";
-    return `${prefix}${f.text}`;
+  /** Each severity present gets an equal share of the description, so a long result cannot hide warnings or errors. */
+  private static compose(
+    heading: CardHeading,
+    fields: ReadonlyArray<APIEmbedField>,
+    feedback: ReadonlyArray<FeedbackMessage>,
+    lead: ReadonlyArray<string> = [],
+  ): APIEmbed {
+    const levels = FeedbackRouter.SEVERITY_ORDER.filter((level) => feedback.some((message) => message.level === level));
+    // With one severity the title already carries its icon; repeat it per line only to tell mixed lines apart.
+    const groups = levels.map((level) => feedback.filter((message) => message.level === level)
+      .map((message) => levels.length > 1 ? EmbedStyle.line(message) : message.text));
+    const intro = lead.join("\n");
+    const available = Math.min(EmbedStyle.MAX_DESCRIPTION, EmbedStyle.MAX_TOTAL - EmbedStyle.overhead(heading.title, fields))
+      - intro.length - 2 - groups.length;
+    const share = Math.floor(available / Math.max(1, groups.length));
+    const body = groups.map((lines) => EmbedStyle.lines(lines, share)).join("\n");
+    const description = [intro, body].filter(Boolean).join("\n\n");
+    return EmbedStyle.card({ ...heading, description, fields });
   }
 }

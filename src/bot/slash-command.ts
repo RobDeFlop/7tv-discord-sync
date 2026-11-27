@@ -1,3 +1,4 @@
+import type { APIEmbed } from "discord.js";
 import type { SyncCore, Command } from "../core/index.ts";
 import { DomainError, type ServerId } from "../domain/index.ts";
 import { FeedbackRouter } from "./feedback-router.ts";
@@ -26,24 +27,24 @@ export abstract class SlashCommand {
 
   public async handle(request: SlashRequest): Promise<void> {
     const server = request.serverId;
-    if (server === null) return request.reply("This command only works in a Server.");
-    if (!request.isAdministrator) return request.reply("Only members with the Administrator permission can use this command.");
+    if (server === null) return request.reply(FeedbackRouter.refusal("This command only works in a Server."));
+    if (!request.isAdministrator) return request.reply(FeedbackRouter.refusal("Only members with the Administrator permission can use this command."));
     await request.defer();
     try {
       const reply = await this.run(server, request);
       if (reply !== undefined) await request.reply(reply);
     } catch (err) {
-      if (err instanceof DomainError) return request.reply(FeedbackRouter.format([err.toFeedback()]));
+      if (err instanceof DomainError) return request.reply(FeedbackRouter.card([err.toFeedback()]));
       Logger.write(LogLevel.error, `slash_command_failed operation=run_command command=${Logger.field(this.path)} server=${Logger.field(server)} ${Logger.failure(err)}`);
-      await request.reply("Something went wrong. Try again in a moment.");
+      await request.reply(FeedbackRouter.refusal("Something went wrong. Try again in a moment."));
     }
   }
 
   /** Do the work and return the ephemeral reply. */
   protected abstract run(server: ServerId, request: SlashRequest): Promise<SlashReply | void>;
 
-  protected async apply(server: ServerId, command: Command): Promise<string> {
-    return FeedbackRouter.format((await this.core.apply(server, command)).feedback);
+  protected async apply(server: ServerId, command: Command): Promise<APIEmbed> {
+    return FeedbackRouter.card((await this.core.apply(server, command)).feedback);
   }
 
   protected requiredString(request: SlashRequest, name: string): string {

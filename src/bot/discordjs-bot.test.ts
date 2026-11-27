@@ -100,9 +100,15 @@ test("DiscordJsSlashRequest sends the queue confirmation as an ephemeral deferre
   await request.reply(embed);
   expect(interaction.deferReply).toHaveBeenCalledWith({ flags: MessageFlags.Ephemeral });
   expect(interaction.editReply).toHaveBeenCalledWith({ embeds: [embed] });
-  await request.editOriginal("Sync complete: 1 emoji changes.");
+  const result = { title: "✅ Sync complete", description: "**1** emoji change." };
+  await request.editOriginal(result);
   expect(interaction.editReply).toHaveBeenLastCalledWith({
-    content: "Sync complete: 1 emoji changes.", embeds: [], components: [], allowedMentions: { parse: [] },
+    content: "", embeds: [result], components: [], allowedMentions: { parse: [] },
+  });
+  interaction.appPermissions = new PermissionsBitField();
+  await request.editOriginal(result);
+  expect(interaction.editReply).toHaveBeenLastCalledWith({
+    content: "**✅ Sync complete**\n\n**1** emoji change.", embeds: [], components: [], allowedMentions: { parse: [] },
   });
   expect(interaction.followUp).not.toHaveBeenCalled();
 });
@@ -130,8 +136,8 @@ test("/search defers privately and renders the matched catalog emote with confir
   await registry.handle(new DiscordJsSlashRequest(interaction as unknown as ChatInputCommandInteraction));
   expect(interaction.deferReply).toHaveBeenCalledWith({ flags: MessageFlags.Ephemeral });
   const reply = interaction.editReply.mock.calls[0]![0];
-  expect(reply.embeds).toMatchObject([{ image: { url: "attachment://preview.png" }, fields: [
-    { value: "Kappa" }, { value: "https://7tv.app/emotes/e1" },
+  expect(reply.embeds).toMatchObject([{ url: "https://7tv.app/emotes/e1", image: { url: "attachment://preview.png" }, fields: [
+    { value: "Kappa" }, { value: "[Open on 7TV](https://7tv.app/emotes/e1)" },
   ] }]);
   expect(reply.components).toHaveLength(1);
   expect(discord.emojis("server")).toEqual([]);
@@ -246,7 +252,7 @@ test("private /status warns when the log channel denies Embed Links and clears w
   const fixture = new LogChannelStatusFixture();
   await fixture.seed("chan-1");
   const missing = await fixture.status();
-  expect(missing.title).toBe("Action needed");
+  expect(missing.title).toBe("⚠️ Action needed");
   expect(missing.description).toContain("Missing **Embed Links** in <#chan-1>.");
   expect(missing.description).toContain("Grant it to the bot in that channel to restore sync feedback.");
   fixture.expectChannelLookup("chan-1");
@@ -255,9 +261,9 @@ test("private /status warns when the log channel denies Embed Links and clears w
 
   fixture.grantChannelEmbedLinksOnly();
   const restored = await fixture.status();
-  expect(restored.title).toBe("No action needed");
+  expect(restored.title).toBe("✅ No action needed");
   expect(restored.description).toBeUndefined();
-  expect(restored.fields?.find((field) => field.name === "Settings")?.value).toContain("Log channel: <#chan-1>");
+  expect(restored.fields?.find((field) => field.name === "Log channel")?.value).toBe("<#chan-1>");
   fixture.expectEffectivePermissionChecks(2);
   fixture.expectNoPublicPost();
 
@@ -275,10 +281,10 @@ test.each(["a failed log channel lookup", "unavailable channel permissions"] as 
 
     const status = await fixture.status();
     fixture.expectChannelLookup("chan-1");
-    expect(status.title).toBe("No action needed");
+    expect(status.title).toBe("✅ No action needed");
     expect(status.description).toBeUndefined();
-    expect(status.fields?.find((field) => field.name === "Settings")?.value).toContain("Log channel: <#chan-1>");
-    expect(status.fields).toContainEqual({ name: "Write queue", value: "Idle" });
+    expect(status.fields?.find((field) => field.name === "Log channel")?.value).toBe("<#chan-1>");
+    expect(status.fields).toContainEqual({ name: "Write queue", value: "Idle", inline: true });
     fixture.expectNoPublicPost();
   },
 );
@@ -287,9 +293,9 @@ test("with no log channel, /status and /sync neither look up a channel nor post 
   const fixture = new LogChannelStatusFixture();
   await fixture.seed(null);
   const status = await fixture.status();
-  expect(status.title).toBe("No action needed");
+  expect(status.title).toBe("✅ No action needed");
   expect(status.description).toBeUndefined();
-  expect(status.fields?.find((field) => field.name === "Settings")?.value).toContain("Log channel: Not set");
+  expect(status.fields?.find((field) => field.name === "Log channel")?.value).toBe("Not set");
   await fixture.syncAndWait();
   fixture.expectNoChannelLookup();
   fixture.expectNoPublicPost();
@@ -300,13 +306,13 @@ test("without Embed Links in the invoking channel, status and queued sync detail
   await fixture.seed(null);
   const status = await fixture.run("status", false);
   expect(status.embeds).toBeUndefined();
-  expect(status.content).toStartWith("No action needed");
-  for (const detail of ["Static Slots", "Animated Slots", "Settings", "Log channel: Not set", "Write queue", "Idle"]) {
+  expect(status.content).toStartWith("**✅ No action needed**");
+  for (const detail of ["Static Slots", "Animated Slots", "Log channel", "Not set", "Write queue", "Idle"]) {
     expect(status.content).toContain(detail);
   }
   const sync = await fixture.run("sync", false);
   expect(sync.embeds).toBeUndefined();
-  expect(sync.content).toStartWith("Sync queued");
+  expect(sync.content).toStartWith("**⏳ Sync queued**");
   expect(sync.content).toContain("private reply");
   fixture.expectNoPublicPost();
 });

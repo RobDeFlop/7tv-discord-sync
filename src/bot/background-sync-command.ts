@@ -1,5 +1,6 @@
 import type { SyncCore, SyncObserver } from "../core/index.ts";
 import type { ServerId } from "../domain/index.ts";
+import { EmbedStyle } from "./embed-style.ts";
 import type { FeedbackRouter } from "./feedback-router.ts";
 import { Logger, LogLevel } from "./logger.ts";
 import { SlashCommand } from "./slash-command.ts";
@@ -12,7 +13,9 @@ export abstract class BackgroundSyncCommand extends SlashCommand {
   }
 
   protected override async run(server: ServerId, request: SlashRequest): Promise<void> {
-    await request.reply({ title: "Sync queued", description: "This private reply will be updated with the result." });
+    await request.reply(EmbedStyle.card({
+      tone: "info", icon: "⏳", title: "Sync queued", description: "This private reply will be updated with the result.",
+    }));
     const observer = this.feedback.privateReply(request);
     void this.schedule(server, request, observer).catch(async (error: unknown) => {
       Logger.write(LogLevel.error, `sync_failed operation=request server=${Logger.field(server)} ${Logger.failure(error)}`);

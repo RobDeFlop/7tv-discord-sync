@@ -2,7 +2,7 @@ import type { APIEmbed } from "discord.js";
 import type { ServerId } from "../domain/index.ts";
 import type { EmoteAddPreview } from "./emote-add-interaction.ts";
 
-export type SlashReply = string | APIEmbed | EmoteAddPreview;
+export type SlashReply = APIEmbed | EmoteAddPreview;
 
 /** One invocation of a slash command, as far as the bot's command handlers need to see it. */
 export abstract class SlashRequest {
@@ -27,5 +27,5 @@ export abstract class SlashRequest {
   public abstract defer(): Promise<void>;
   public abstract reply(reply: SlashReply): Promise<void>;
   /** Edit the original ephemeral acknowledgement, never send a follow-up. */
-  public abstract editOriginal(text: string): Promise<void>;
+  public abstract editOriginal(embed: APIEmbed): Promise<void>;
 }

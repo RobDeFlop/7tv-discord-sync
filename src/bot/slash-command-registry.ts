@@ -17,7 +17,7 @@ import { StatusSlashCommand } from "./commands/status-slash-command.ts";
 import { SyncSlashCommand } from "./commands/sync-slash-command.ts";
 import { TrendingSlashCommand } from "./commands/trending-slash-command.ts";
 import type { EmoteAddInteraction } from "./emote-add-interaction.ts";
-import type { FeedbackRouter, LogChannel } from "./feedback-router.ts";
+import { FeedbackRouter, type LogChannel } from "./feedback-router.ts";
 import type { SlashCommand, SlashOption } from "./slash-command.ts";
 import type { SlashRequest } from "./slash-request.ts";
 
@@ -44,7 +44,7 @@ export class SlashCommandRegistry {
 
   public async handle(request: SlashRequest): Promise<void> {
     const command = this.commands.get(request.commandPath);
-    if (!command) return request.reply("Unknown command.");
+    if (!command) return request.reply(FeedbackRouter.refusal("Unknown command."));
     return command.handle(request);
   }
 

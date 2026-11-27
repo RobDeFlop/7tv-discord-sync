@@ -17,7 +17,6 @@ import { SlashRequest, type SlashReply } from "./slash-request.ts";
 
 /** A slash command interaction behind SlashRequest. Replies are always ephemeral. */
 export class DiscordJsSlashRequest extends SlashRequest {
-  private static readonly MAX_MESSAGE = 2000;
   private replied = false;
 
   public constructor(private readonly interaction: ChatInputCommandInteraction) {
@@ -54,22 +53,25 @@ export class DiscordJsSlashRequest extends SlashRequest {
   }
 
   public async reply(reply: SlashReply): Promise<void> {
-    const hasEmbedLinks = this.interaction.appPermissions.has(PermissionFlagsBits.EmbedLinks);
-    const options = typeof reply === "string"
-      ? { content: reply.slice(0, DiscordJsSlashRequest.MAX_MESSAGE) }
-      : "originalName" in reply ? DiscordJsEmoteAddInteraction.previewReply(reply, hasEmbedLinks)
-      : new DetailedSlashReply(reply).render(hasEmbedLinks);
+    const options = "originalName" in reply
+      ? DiscordJsEmoteAddInteraction.previewReply(reply, this.hasEmbedLinks)
+      : new DetailedSlashReply(reply).render(this.hasEmbedLinks);
     if (this.interaction.deferred && !this.replied) await this.interaction.editReply(options);
     else if (this.replied || this.interaction.replied) await this.interaction.followUp({ ...options, flags: MessageFlags.Ephemeral });
     else await this.interaction.reply({ ...options, flags: MessageFlags.Ephemeral });
     this.replied = true;
   }
 
-  public async editOriginal(text: string): Promise<void> {
+  /** Replaces whatever the acknowledgement showed, so neither a stale embed nor stale text survives the edit. */
+  public async editOriginal(embed: APIEmbed): Promise<void> {
     await this.interaction.editReply({
-      content: text.slice(0, DiscordJsSlashRequest.MAX_MESSAGE).toWellFormed(),
-      embeds: [], components: [], allowedMentions: { parse: [] },
+      content: "", embeds: [], components: [], ...new DetailedSlashReply(embed).render(this.hasEmbedLinks),
+      allowedMentions: { parse: [] },
     });
+  }
+
+  private get hasEmbedLinks(): boolean {
+    return this.interaction.appPermissions.has(PermissionFlagsBits.EmbedLinks);
   }
 }
 

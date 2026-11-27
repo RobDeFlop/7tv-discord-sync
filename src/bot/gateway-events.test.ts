@@ -236,9 +236,13 @@ describe("feedback routing", () => {
     await events.emojiChanged(A);
     expect(log.sent).toHaveLength(1);
     expect(log.sent[0]!.channelId).toBe("chan-1");
-    expect(log.sent[0]!.embeds).toEqual([
-      { title: "Sync errors", description: expect.stringContaining("Manage Expressions") },
-    ]);
+    expect(log.sent[0]!.embeds).toEqual([{
+      color: 0xed4245,
+      title: "❌ Couldn't complete that",
+      description: expect.stringContaining("Manage Expressions"),
+      footer: { text: "7TV Discord Sync" },
+      timestamp: expect.any(String),
+    }]);
   });
 
   test("without a log channel nothing is sent", async () => {

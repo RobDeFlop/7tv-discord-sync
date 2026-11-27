@@ -9,6 +9,7 @@ import {
   type ChatInputCommandInteraction,
   type Interaction,
   type InteractionEditReplyOptions,
+  type InteractionReplyOptions,
 } from "discord.js";
 import { DiscordJsSlashRequest } from "./discordjs-bot.ts";
 import { DiscordJsEmoteAddInteraction } from "./discordjs-emote-add.ts";
@@ -36,15 +37,18 @@ test.each([true, false])("private preview preserves the names, link and confirma
   const [reply] = interaction.editReply.mock.calls[0]!;
   if (hasEmbedLinks) {
     expect(reply.files).toEqual([{ name: "preview.gif", attachment: Buffer.from(preview.image.bytes) }]);
-    expect(reply.embeds?.[0]).toMatchObject({ title: "Confirm emote add", description: slotNotice, image: { url: "attachment://preview.gif" }, fields: [
-      { name: "Original 7TV name", value: "Pog Champ" },
-      { name: "Add as", value: "Pog\\_Champ" },
-      { name: "7TV emote", value: preview.emoteUrl },
-    ] });
+    expect(reply.embeds?.[0]).toMatchObject({
+      title: "➕ Confirm emote add", url: preview.emoteUrl, description: slotNotice, image: { url: "attachment://preview.gif" },
+      fields: [
+        { name: "Original 7TV name", value: "Pog Champ" },
+        { name: "Add as", value: "Pog\\_Champ" },
+        { name: "7TV emote", value: `[Open on 7TV](${preview.emoteUrl})` },
+      ],
+    });
   } else {
     expect(reply.embeds).toBeUndefined();
     expect(reply.files).toBeUndefined();
-    expect(reply.content).toStartWith(`Confirm emote add\n\n${slotNotice}`);
+    expect(reply.content).toStartWith(`**➕ Confirm emote add**\n\n${preview.emoteUrl}\n\n${slotNotice}`);
     expect(reply.content).toContain("**Original 7TV name**\nPog Champ");
     expect(reply.content).toContain("**Add as**\nPog\\_Champ");
     expect(reply.content).toContain(preview.emoteUrl);
@@ -73,7 +77,8 @@ test("an oversized preview renders its image and explanation without confirmatio
   expect(embed).toMatchObject({
     description: importError,
     image: { url: "attachment://preview.png" },
-    fields: [{ name: "Original 7TV name", value: preview.originalName }, { name: "7TV emote", value: preview.emoteUrl }],
+    title: "❌ Cannot import this emote",
+    fields: [{ name: "Original 7TV name", value: preview.originalName }, { name: "7TV emote", value: `[Open on 7TV](${preview.emoteUrl})` }],
   });
 });
 
@@ -97,9 +102,10 @@ test("the Choose name button opens a prefilled modal, and its submission routes 
   expect(label.component.value).toBe(preview.originalName);
 
   const getTextInputValue = mock((id: string) => "poggers");
-  const reply = mock(async (options: { content: string; flags: MessageFlags }) => {});
+  const reply = mock(async (options: InteractionReplyOptions) => {});
   const submission = DiscordJsEmoteAddInteraction.from({
     customId: form.custom_id,
+    appPermissions: new PermissionsBitField(PermissionFlagsBits.EmbedLinks),
     isButton: () => false,
     isModalSubmit: () => true,
     fields: { getTextInputValue },
@@ -108,6 +114,7 @@ test("the Choose name button opens a prefilled modal, and its submission routes 
   expect(getTextInputValue).toHaveBeenCalledWith(label.component.custom_id);
   expect(submission?.previewId).toBe(preview.id);
   expect(submission?.action).toEqual({ kind: "submit", name: "poggers" });
-  await submission?.reply("This emote preview is no longer active.");
-  expect(reply).toHaveBeenCalledWith({ content: "This emote preview is no longer active.", flags: MessageFlags.Ephemeral });
+  const expired = { title: "❌ Couldn't complete that", description: "This emote preview is no longer active." };
+  await submission?.reply(expired);
+  expect(reply).toHaveBeenCalledWith({ embeds: [expired], flags: MessageFlags.Ephemeral });
 });

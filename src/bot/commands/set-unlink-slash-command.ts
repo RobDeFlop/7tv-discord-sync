@@ -1,5 +1,7 @@
+import type { APIEmbed } from "discord.js";
 import { UnlinkSourceSetCommand } from "../../core/index.ts";
 import type { ServerId } from "../../domain/index.ts";
+import { FeedbackRouter } from "../feedback-router.ts";
 import { SlashCommand, type SlashOption } from "../slash-command.ts";
 import type { SlashRequest } from "../slash-request.ts";
 
@@ -17,9 +19,9 @@ export class SetUnlinkSlashCommand extends SlashCommand {
     },
   ];
 
-  protected async run(server: ServerId, request: SlashRequest): Promise<string> {
+  protected async run(server: ServerId, request: SlashRequest): Promise<APIEmbed> {
     const emotes = request.option("emotes");
-    if (emotes !== "delete" && emotes !== "keep") return "Choose whether to delete or keep the Source Set's emotes.";
+    if (emotes !== "delete" && emotes !== "keep") return FeedbackRouter.refusal("Choose whether to delete or keep the Source Set's emotes.");
     return this.apply(server, new UnlinkSourceSetCommand(emotes === "keep"));
   }
 }
