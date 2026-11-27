@@ -61,7 +61,7 @@ export class DiscordJsEmoteAddInteraction extends EmoteAddInteraction {
       image: { url: `attachment://${filename}` },
     };
     const reply = {
-      ...DetailedSlashReply.render(embed, hasEmbedLinks),
+      ...new DetailedSlashReply(embed).render(hasEmbedLinks),
       ...(hasEmbedLinks ? { files: [{ attachment: Buffer.from(preview.image.bytes), name: filename }] } : {}),
     };
     if (preview.importError !== undefined) return reply;
