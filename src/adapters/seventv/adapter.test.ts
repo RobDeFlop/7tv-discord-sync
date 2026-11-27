@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { InvalidLinkError } from "../../domain/index.ts";
 import { FakeImagePipeline } from "../../testing/fakes.ts";
-import { SevenTvAdapter } from "./adapter.ts";
+import { SevenTvAdapter, SevenTvSearchError } from "./adapter.ts";
 import { SevenTvFixtures as fx } from "./fixtures.ts";
 
 type Route = (url: string, init?: RequestInit) => Response | undefined;
@@ -103,7 +103,7 @@ describe("exact name search", () => {
   test.each([503, { errors: [{ message: "unavailable" }], data: { emotes: { items: [] } } }, {}])(
     "failed searches are not empty results (%p)", async (response) => {
       const { adapter } = setup({ [`${API}/gql`]: response });
-      await expect(adapter.findEmoteByExactName("Pog")).rejects.toThrow();
+      await expect(adapter.findEmoteByExactName("Pog")).rejects.toBeInstanceOf(SevenTvSearchError);
     },
   );
 });

@@ -26,6 +26,8 @@ const CATEGORY: Record<TrendingPeriod, string> = {
 const SEARCH_QUERY =
   "query SearchEmotes($query: String!, $page: Int, $sort: Sort, $limit: Int, $filter: EmoteSearchFilter) { emotes(query: $query, page: $page, sort: $sort, limit: $limit, filter: $filter) { count items { id name animated host { url files { name width height frame_count size format } } } } }";
 
+export class SevenTvSearchError extends Error {}
+
 export interface SevenTvAdapterOptions {
   fetch?: typeof fetch;
   /** Open the EventAPI socket. Defaults to the global WebSocket. */
@@ -100,13 +102,12 @@ export class SevenTvAdapter extends SevenTvPort {
   }
 
   public async findEmoteByExactName(name: string): Promise<SevenTvEmote | null> {
-    const folded = name.toLowerCase();
     for (let page = 1; ; page++) {
       const body = await this.searchPage(name, CATEGORY["all-time"], true, page, SEARCH_PAGE_SIZE);
       const result = body.data?.emotes;
-      if (body.errors?.length || !Array.isArray(result?.items)) throw new Error("7TV search returned an invalid result");
+      if (body.errors?.length || !Array.isArray(result?.items)) throw new SevenTvSearchError("7TV search returned an invalid result");
       const { items, count } = result;
-      const match = items.find((item) => item.name.toLowerCase() === folded);
+      const match = items.find((item) => this.matchesExactName(item.name, name));
       if (match) return SevenTvMapper.emote(match);
       if (items.length < SEARCH_PAGE_SIZE || page * SEARCH_PAGE_SIZE >= count) return null;
     }
@@ -136,7 +137,7 @@ export class SevenTvAdapter extends SevenTvPort {
         query: SEARCH_QUERY,
       }),
     });
-    if (!res.ok) throw new Error(`7TV search failed: HTTP ${res.status}`);
+    if (!res.ok) throw new SevenTvSearchError(`7TV search failed: HTTP ${res.status}`);
     return (await res.json()) as { errors?: unknown[]; data?: { emotes?: { count: number; items: ApiEmote[] } } };
   }
 

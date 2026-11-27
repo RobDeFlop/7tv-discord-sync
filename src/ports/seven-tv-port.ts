@@ -48,6 +48,10 @@ export abstract class SevenTvPort {
     };
   }
 
+  protected matchesExactName(candidate: string, query: string): boolean {
+    return candidate.toLowerCase() === query.toLowerCase();
+  }
+
   /** Tell every subscriber about a change. */
   protected emit(change: SevenTvChange): void {
     for (const listener of [...this.listeners]) listener(change);

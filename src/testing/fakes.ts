@@ -239,7 +239,7 @@ export class FakeSevenTv extends SevenTvPort {
   }
 
   public async findEmoteByExactName(name: string): Promise<SevenTvEmote | null> {
-    const match = [...this.emotes.values()].find((emote) => emote.name.toLowerCase() === name.toLowerCase());
+    const match = [...this.emotes.values()].find((emote) => this.matchesExactName(emote.name, name));
     return match ? { ...match } : null;
   }
 
