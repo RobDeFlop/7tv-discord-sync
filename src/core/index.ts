@@ -60,7 +60,9 @@ export class SyncCore {
           prepared: new PreparedEmotePromotion(emote, existing.name, existing.id),
         };
       }
-      if (result.reason === "too-large") return { emote, previewImage: result.previewImage, importFailure: result.reason };
+      if ("previewImage" in result) {
+        return { emote, previewImage: result.previewImage, importFailure: result.reason };
+      }
       return { feedback: { level: "error", text: `Could not preview this emote. ${new ImageFailure(emote, result.reason).text}` } };
     }
 
