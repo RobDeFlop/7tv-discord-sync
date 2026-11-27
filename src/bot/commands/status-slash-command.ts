@@ -22,16 +22,17 @@ export class StatusSlashCommand extends SlashCommand {
   protected async run(server: ServerId): Promise<APIEmbed> {
     const status = await this.core.status(server);
     const hasEmbedLinks = status.logChannelId ? await this.logChannel.hasEmbedLinks(status.logChannelId) : null;
-    return StatusSlashCommand.render(status, hasEmbedLinks);
+    // Only warn when the permission check confirms that Embed Links is missing.
+    return StatusSlashCommand.render(status, hasEmbedLinks ?? true);
   }
 
-  private static render(status: ServerStatus, hasEmbedLinks: boolean | null): APIEmbed {
+  private static render(status: ServerStatus, hasEmbedLinks: boolean): APIEmbed {
     const channel = status.logChannelId ? `<#${status.logChannelId}>` : null;
     const actions: string[] = [];
     if (!status.manageExpressions) {
       actions.push("Missing **Manage Expressions**. Grant it to the bot’s role and run `/sync` to resume emoji updates.");
     }
-    if (channel && hasEmbedLinks !== null && !hasEmbedLinks) {
+    if (channel && !hasEmbedLinks) {
       actions.push(`Missing **Embed Links** in ${channel}. Grant it to the bot in that channel to restore sync feedback.`);
     }
     if (status.problems.some((problem) => problem.kind !== "renamed-with-suffix")) {

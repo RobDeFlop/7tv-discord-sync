@@ -48,7 +48,7 @@ class LogChannelStatusFixture {
   private readonly serverId = "server-1";
   private readonly store = new FakeStore();
   private readonly botMember = { permissions: new PermissionsBitField(PermissionFlagsBits.EmbedLinks) };
-  private readonly permissionsFor = mock(() => new PermissionsBitField());
+  private readonly permissionsFor = mock((): PermissionsBitField | null => new PermissionsBitField());
   private readonly send = mock(async () => {});
   private readonly fetchChannel = mock(async () => ({
     isSendable: () => true,
@@ -114,6 +114,10 @@ class LogChannelStatusFixture {
     this.fetchChannel.mockRejectedValueOnce(new Error("Cannot read channel"));
   }
 
+  public makeChannelPermissionsUnavailableOnce(): void {
+    this.permissionsFor.mockReturnValueOnce(null);
+  }
+
   public expectChannelLookup(channelId: string): void {
     expect(this.fetchChannel).toHaveBeenCalledWith(channelId);
   }
@@ -162,18 +166,23 @@ test("private /status warns when the log channel denies Embed Links and clears w
   });
 });
 
-test("a log channel permission read failure does not break /status or claim Embed Links is missing", async () => {
-  const fixture = new LogChannelStatusFixture();
-  await fixture.seed("chan-1");
-  fixture.failChannelLookupOnce();
-  const status = await fixture.status();
-  fixture.expectChannelLookup("chan-1");
-  expect(status.title).toBe("No action needed");
-  expect(status.description).toBeUndefined();
-  expect(status.fields?.find((field) => field.name === "Settings")?.value).toContain("Log channel: <#chan-1>");
-  expect(status.fields).toContainEqual({ name: "Write queue", value: "Idle" });
-  fixture.expectNoPublicPost();
-});
+test.each(["a failed log channel lookup", "unavailable channel permissions"] as const)(
+  "%s does not break /status or cause an Embed Links warning",
+  async (scenario) => {
+    const fixture = new LogChannelStatusFixture();
+    await fixture.seed("chan-1");
+    if (scenario === "a failed log channel lookup") fixture.failChannelLookupOnce();
+    else fixture.makeChannelPermissionsUnavailableOnce();
+
+    const status = await fixture.status();
+    fixture.expectChannelLookup("chan-1");
+    expect(status.title).toBe("No action needed");
+    expect(status.description).toBeUndefined();
+    expect(status.fields?.find((field) => field.name === "Settings")?.value).toContain("Log channel: <#chan-1>");
+    expect(status.fields).toContainEqual({ name: "Write queue", value: "Idle" });
+    fixture.expectNoPublicPost();
+  },
+);
 
 test("with no log channel, /status and /sync neither look up a channel nor post publicly", async () => {
   const fixture = new LogChannelStatusFixture();
