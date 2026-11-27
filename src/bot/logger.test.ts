@@ -20,12 +20,12 @@ test("Logger writes a single failure message with only safe numeric diagnostics"
     status: 404, code: 10062, url: "/interactions/123/private-token", requestBody: { token: "private-token" },
   });
 
-  logger.error("Startup failed:", failure);
-  logger.error("Startup failed:", { status: 403, code: "private-token" });
-  logger.error("Startup failed:", { status: Infinity, code: 10062 });
-  logger.error("Startup failed:", { status: "private-token", code: Number.MAX_SAFE_INTEGER + 1 });
-  logger.error("Startup failed:", "private-token");
-  logger.error("Startup failed:", null);
+  logger.error("Startup failed:", Logger.diagnostics(failure));
+  logger.error("Startup failed:", Logger.diagnostics({ status: 403, code: "private-token" }));
+  logger.error("Startup failed:", Logger.diagnostics({ status: Infinity, code: 10062 }));
+  logger.error("Startup failed:", Logger.diagnostics({ status: "private-token", code: Number.MAX_SAFE_INTEGER + 1 }));
+  logger.error("Startup failed:", Logger.diagnostics("private-token"));
+  logger.error("Startup failed:", Logger.diagnostics(null));
 
   expect(error.mock.calls).toEqual([
     ["Startup failed: status=404 code=10062"],
