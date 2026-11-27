@@ -1,4 +1,5 @@
 import sharp, { type Metadata } from "sharp";
+import { Logger, LogLevel } from "../logger.ts";
 import type { ImageResult } from "../ports/index.ts";
 
 export interface PrepareOptions {
@@ -29,20 +30,24 @@ export class ImagePipeline {
    */
   public async prepare(input: Uint8Array, _declaredAnimated?: boolean): Promise<ImageResult> {
     const maxBytes = this.maxBytes;
+    let operation = "probe_image";
     try {
       const meta = await sharp(input, { animated: true }).metadata();
       const animated = (meta.pages ?? 1) > 1;
+      operation = animated ? "encode_gif" : "encode_png";
       const bytes = animated
         ? await this.shrinkAnimated(input, meta, maxBytes)
         : await this.shrinkStatic(input, maxBytes);
       if (bytes) return { ok: true, image: { bytes, animated } };
 
+      operation = "encode_preview";
       const preview = await sharp(input, { page: 0 })
         .resize(128, 128, { fit: "inside", withoutEnlargement: true })
         .png()
         .toBuffer();
       return { ok: false, reason: "too-large", previewImage: { bytes: preview, animated: false } };
-    } catch {
+    } catch (error) {
+      Logger.write(LogLevel.warn, `image_prepare_failed operation=${operation} ${Logger.failure(error)}`);
       return { ok: false, reason: "unavailable" };
     }
   }
@@ -92,7 +97,7 @@ export class ImagePipeline {
     for (let i = 0; i < pages; i += keepEvery) kept.push(i);
     if (kept.length < 2) return null;
     const newDelays = kept.map((from, k) => {
-      const to = k + 1 < kept.length ? kept[k + 1]! : pages;
+      const to = kept[k + 1] ?? pages;
       let sum = 0;
       for (let i = from; i < to; i++) sum += delays[i] ?? 100;
       return sum;
@@ -106,7 +111,9 @@ export class ImagePipeline {
           .toBuffer({ resolveWithObject: true }),
       ),
     );
-    const { width, height } = frames[0]!.info;
+    const [first] = frames;
+    if (!first) return null;
+    const { width, height } = first.info;
     const raw = Buffer.concat(frames.map((f) => f.data));
     return sharp(raw, {
       raw: { width, height: height * frames.length, channels: 4, pageHeight: height },

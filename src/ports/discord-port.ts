@@ -2,8 +2,8 @@ import { ServerQuotas, type DiscordEmoji, type EmojiImage, type ServerId, type W
 
 /** A write hit Discord's rate limit; the queue waits and retries. */
 export class RateLimitError extends Error {
-  public constructor(public readonly retryAfterMs: number) {
-    super(`Rate limited, retry after ${retryAfterMs}ms`);
+  public constructor(public readonly retryAfterMs: number, options?: ErrorOptions) {
+    super(`Rate limited, retry after ${retryAfterMs}ms`, options);
   }
 }
 

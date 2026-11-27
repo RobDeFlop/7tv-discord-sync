@@ -8,10 +8,11 @@ export class Config {
   ) {}
 
   public static fromEnv(env: Record<string, string | undefined> = process.env): Config {
-    const missing = Config.REQUIRED.filter((k) => !env[k]);
-    if (missing.length > 0) {
+    const { DISCORD_TOKEN, DATABASE_URL } = env;
+    if (!DISCORD_TOKEN || !DATABASE_URL) {
+      const missing = Config.REQUIRED.filter((key) => !env[key]);
       throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
     }
-    return new Config(env.DISCORD_TOKEN!, env.DATABASE_URL!);
+    return new Config(DISCORD_TOKEN, DATABASE_URL);
   }
 }

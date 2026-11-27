@@ -6,6 +6,7 @@ import {
   type Guild,
 } from "discord.js";
 import type { DiscordEmoji, EmojiImage, ServerId } from "../../domain/index.ts";
+import { Logger, LogLevel } from "../../logger.ts";
 import { DiscordAdapter } from "./discord-adapter.ts";
 import { GuildGateway, GuildProvider } from "./guild-gateway.ts";
 import { RateLimitError, WriteQueue } from "./write-queue.ts";
@@ -35,14 +36,16 @@ export class DiscordJsGuild extends GuildGateway {
 
   public async downloadEmojiImage(emoji: DiscordEmoji): Promise<EmojiImage | null> {
     const { id, animated } = emoji;
-    const url = this.guild.client.rest.cdn.emoji(id, { extension: animated ? "gif" : "png" });
+    const fields = `operation=download_cdn server=${Logger.field(this.guild.id)} emoji=${Logger.field(id)}`;
     try {
+      const url = this.guild.client.rest.cdn.emoji(id, { extension: animated ? "gif" : "png" });
       const response = await this.http(url, { redirect: "error" });
-      if (!response.ok) return null;
-      return { bytes: new Uint8Array(await response.arrayBuffer()), animated };
-    } catch {
-      return null;
+      if (response.ok) return { bytes: new Uint8Array(await response.arrayBuffer()), animated };
+      Logger.write(LogLevel.warn, `discord_image_unavailable ${fields} status=${response.status}`);
+    } catch (error) {
+      Logger.write(LogLevel.warn, `discord_image_unavailable ${fields} ${Logger.failure(error)}`);
     }
+    return null;
   }
 
   public createEmoji(name: string, image: EmojiImage): Promise<DiscordEmoji> {
@@ -72,12 +75,19 @@ export class DiscordJsGuild extends GuildGateway {
   private static async mapRateLimit<T>(call: () => Promise<T>): Promise<T> {
     try {
       return await call();
-    } catch (e) {
-      if (e instanceof RestRateLimitError) throw new RateLimitError(e.timeToReset);
-      const err = e as { status?: number; retryAfter?: number };
-      if (err?.status === 429) throw new RateLimitError((err.retryAfter ?? 1) * 1000);
-      throw e;
+    } catch (error) {
+      if (error instanceof RestRateLimitError) throw new RateLimitError(DiscordJsGuild.retryDelay(error.timeToReset), { cause: error });
+      if (error !== null && typeof error === "object" && "status" in error && error.status === 429) {
+        const seconds = "retryAfter" in error ? error.retryAfter : undefined;
+        const ms = typeof seconds === "number" ? seconds * 1000 : undefined;
+        throw new RateLimitError(DiscordJsGuild.retryDelay(ms), { cause: error });
+      }
+      throw error;
     }
+  }
+
+  private static retryDelay(ms: number | undefined): number {
+    return ms !== undefined && ms >= 0 && ms <= 2_147_483_647 ? ms : 1000;
   }
 }
 

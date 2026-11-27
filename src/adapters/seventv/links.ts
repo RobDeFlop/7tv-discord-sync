@@ -5,7 +5,6 @@ export class SevenTvLink {
   private static readonly URL_RE =
     /^https?:\/\/(?:www\.|old\.)?7tv\.app\/(emotes|users|emote-sets)\/([0-9A-Za-z]{24,26})(?:[/?#].*)?$/;
   private static readonly BARE_RE = /^[0-9A-Za-z]{24,26}$/;
-  private static readonly KINDS = { emotes: "emote", users: "user", "emote-sets": "set" } as const;
 
   private constructor(
     public readonly kind: LinkKind,
@@ -15,8 +14,14 @@ export class SevenTvLink {
   /** Null when the text is not a 7TV link or id. */
   public static parse(input: string): SevenTvLink | null {
     const text = input.trim();
-    const m = SevenTvLink.URL_RE.exec(text);
-    if (m) return new SevenTvLink(SevenTvLink.KINDS[m[1] as keyof typeof SevenTvLink.KINDS], m[2]!);
+    const [, path, id] = SevenTvLink.URL_RE.exec(text) ?? [];
+    if (id) {
+      switch (path) {
+        case "emotes": return new SevenTvLink("emote", id);
+        case "users": return new SevenTvLink("user", id);
+        case "emote-sets": return new SevenTvLink("set", id);
+      }
+    }
     if (SevenTvLink.BARE_RE.test(text)) return new SevenTvLink("unknown", text);
     return null;
   }

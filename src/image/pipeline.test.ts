@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import sharp from "sharp";
 import { ImagePipeline } from "./pipeline.ts";
 
@@ -97,7 +97,13 @@ describe("ImagePipeline", () => {
   });
 
   test("reports unavailable for bytes that are not an image", async () => {
-    const result = await new ImagePipeline().prepare(new TextEncoder().encode("not an image"));
-    expect(result).toEqual({ ok: false, reason: "unavailable" });
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = await new ImagePipeline().prepare(new TextEncoder().encode("not an image"));
+      expect(result).toEqual({ ok: false, reason: "unavailable" });
+      expect(warn.mock.calls).toEqual([[expect.stringMatching(/image_prepare_failed operation=probe_image error=Error$/)]]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
