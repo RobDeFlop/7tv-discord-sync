@@ -2,7 +2,8 @@ import { expect, mock, test } from "bun:test";
 import {
   ActionRowBuilder,
   ComponentType,
-  EmbedBuilder,
+  PermissionsBitField,
+  PermissionFlagsBits,
   MessageFlags,
   ModalBuilder,
   type ChatInputCommandInteraction,
@@ -14,13 +15,15 @@ import { DiscordJsEmoteAddInteraction } from "./discordjs-emote-add.ts";
 
 const preview = {
   id: "preview-id",
+  emoteUrl: "https://7tv.app/emotes/e1",
   originalName: "Pog Champ",
   defaultName: "Pog_Champ",
   image: { animated: true, bytes: new Uint8Array([1, 2, 3]) },
 };
 
-test("the deferred private slash reply renders the image, names, and confirmation buttons", async () => {
+test.each([true, false])("private preview preserves the names, link and confirmation buttons (Embed Links: %s)", async (hasEmbedLinks) => {
   const interaction = {
+    appPermissions: new PermissionsBitField(hasEmbedLinks ? PermissionFlagsBits.EmbedLinks : 0n),
     deferred: false,
     deferReply: mock(async (options: { flags: MessageFlags }) => { interaction.deferred = true; }),
     editReply: mock(async (options: InteractionEditReplyOptions) => {}),
@@ -31,13 +34,21 @@ test("the deferred private slash reply renders the image, names, and confirmatio
   await request.reply({ ...preview, slotNotice });
   expect(interaction.deferReply).toHaveBeenCalledWith({ flags: MessageFlags.Ephemeral });
   const [reply] = interaction.editReply.mock.calls[0]!;
-  expect(reply.files).toEqual([{ name: "preview.gif", attachment: Buffer.from(preview.image.bytes) }]);
-  const embed = reply.embeds?.[0];
-  if (!(embed instanceof EmbedBuilder)) throw new Error("Expected an emote preview embed");
-  expect(embed.toJSON()).toMatchObject({ description: slotNotice, image: { url: "attachment://preview.gif" }, fields: [
-    { name: "Original 7TV name", value: "Pog Champ" },
-    { name: "Add as", value: "Pog\\_Champ" },
-  ] });
+  if (hasEmbedLinks) {
+    expect(reply.files).toEqual([{ name: "preview.gif", attachment: Buffer.from(preview.image.bytes) }]);
+    expect(reply.embeds?.[0]).toMatchObject({ title: "Confirm emote add", description: slotNotice, image: { url: "attachment://preview.gif" }, fields: [
+      { name: "Original 7TV name", value: "Pog Champ" },
+      { name: "Add as", value: "Pog\\_Champ" },
+      { name: "7TV emote", value: preview.emoteUrl },
+    ] });
+  } else {
+    expect(reply.embeds).toBeUndefined();
+    expect(reply.files).toBeUndefined();
+    expect(reply.content).toStartWith(`Confirm emote add\n\n${slotNotice}`);
+    expect(reply.content).toContain("**Original 7TV name**\nPog Champ");
+    expect(reply.content).toContain("**Add as**\nPog\\_Champ");
+    expect(reply.content).toContain(preview.emoteUrl);
+  }
   const row = reply.components?.[0];
   if (!(row instanceof ActionRowBuilder)) throw new Error("Expected emote preview buttons");
   const buttons = row.toJSON().components;
@@ -51,23 +62,23 @@ test("the deferred private slash reply renders the image, names, and confirmatio
 test("an oversized preview renders its image and explanation without confirmation controls", () => {
   const importError = "This emote cannot be imported.";
   const reply = DiscordJsEmoteAddInteraction.previewReply({
+    emoteUrl: preview.emoteUrl,
     originalName: preview.originalName,
     image: { ...preview.image, animated: false },
     importError,
-  });
+  }, true);
   expect(reply.files).toEqual([{ name: "preview.png", attachment: Buffer.from(preview.image.bytes) }]);
   expect(reply.components).toBeUndefined();
   const embed = reply.embeds?.[0];
-  if (!(embed instanceof EmbedBuilder)) throw new Error("Expected an emote preview embed");
-  expect(embed.toJSON()).toMatchObject({
+  expect(embed).toMatchObject({
     description: importError,
     image: { url: "attachment://preview.png" },
-    fields: [{ name: "Original 7TV name", value: preview.originalName }],
+    fields: [{ name: "Original 7TV name", value: preview.originalName }, { name: "7TV emote", value: preview.emoteUrl }],
   });
 });
 
 test("the Choose name button opens a prefilled modal, and its submission routes to the same preview", async () => {
-  const row = DiscordJsEmoteAddInteraction.previewReply(preview).components?.[0];
+  const row = DiscordJsEmoteAddInteraction.previewReply(preview, true).components?.[0];
   if (!(row instanceof ActionRowBuilder)) throw new Error("Expected emote preview buttons");
   const button = row.toJSON().components[1]!;
   const showModal = mock(async (modal: ModalBuilder) => {});

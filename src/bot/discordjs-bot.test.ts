@@ -20,6 +20,7 @@ import { SlashCommandRegistry } from "./slash-command-registry.ts";
 
 test("DiscordJsSlashRequest sends the queue confirmation as an ephemeral deferred embed", async () => {
   const interaction = {
+    appPermissions: new PermissionsBitField(PermissionFlagsBits.EmbedLinks),
     deferred: false,
     deferReply: mock(async () => {}),
     editReply: mock(async () => {}),
@@ -76,9 +77,10 @@ class LogChannelStatusFixture {
     await this.store.save(this.serverId, state);
   }
 
-  public async run(commandName: string): Promise<InteractionEditReplyOptions> {
+  public async run(commandName: string, hasEmbedLinks = true): Promise<InteractionEditReplyOptions> {
     const interaction = {
       commandName,
+      appPermissions: new PermissionsBitField(hasEmbedLinks ? PermissionFlagsBits.EmbedLinks : 0n),
       deferred: false,
       guildId: this.serverId,
       memberPermissions: new PermissionsBitField(PermissionFlagsBits.Administrator),
@@ -193,5 +195,21 @@ test("with no log channel, /status and /sync neither look up a channel nor post 
   expect(status.fields?.find((field) => field.name === "Settings")?.value).toContain("Log channel: Not set");
   await fixture.syncAndWait();
   fixture.expectNoChannelLookup();
+  fixture.expectNoPublicPost();
+});
+
+test("without Embed Links in the invoking channel, status and queued sync details remain private text", async () => {
+  const fixture = new LogChannelStatusFixture();
+  await fixture.seed(null);
+  const status = await fixture.run("status", false);
+  expect(status.embeds).toBeUndefined();
+  expect(status.content).toStartWith("No action needed");
+  for (const detail of ["Static Slots", "Animated Slots", "Settings", "Log channel: Not set", "Write queue", "Idle"]) {
+    expect(status.content).toContain(detail);
+  }
+  const sync = await fixture.run("sync", false);
+  expect(sync.embeds).toBeUndefined();
+  expect(sync.content).toStartWith("Sync queued");
+  expect(sync.content).toContain("Check `/status`");
   fixture.expectNoPublicPost();
 });
