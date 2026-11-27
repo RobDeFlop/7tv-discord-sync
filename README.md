@@ -129,6 +129,18 @@ bun run db:generate # regenerate migrations after a schema change (needs DATABAS
 
 With Docker Compose available, `bash scripts/test-compose.sh` checks both operator install paths using a local image and disposable databases. It does not require a Discord token or a published image.
 
+### Run the development bot in Docker
+
+Create a private `.env.develop` in the repo root and set `DEV_DISCORD_TOKEN` to the token for a separate Discord application invited to a test server. Don't use the production bot's token. Git ignores `.env.develop`. You can also set `LOG_LEVEL` there.
+
+```sh
+docker compose --env-file .env.develop -f compose.develop.yaml up --build
+```
+
+[`compose.develop.yaml`](compose.develop.yaml) builds the bot from your checkout and starts it when Postgres is healthy. No host Bun install or published bot image is needed. Run the same command after editing source to rebuild. The dev stack has its own database volume and does not publish a database port. Use `docker compose --env-file .env.develop -f compose.develop.yaml down` to remove the containers and keep the database.
+
+For deployment, use the [operator install guide](install/README.md) instead.
+
 ### Local Postgres
 
 To run only the database in Docker, copy [`compose.example.yaml`](compose.example.yaml) to `compose.yaml` in the repo root if you don't already have one, then start it:
