@@ -6,4 +6,4 @@
 
 **Bot replies:** Every reply and log post is a styled card from `src/bot/embed-style.ts`. `FeedbackRouter` builds the sync and command cards, and `/status` and the emote preview set their own layouts. Without Embed Links, `DetailedSlashReply` turns a card into text.
 
-**Next action:** In Discord, confirm that queued commands edit their original private replies and that an expired reply falls back to the log channel or `/status`.
+**Next action:** None pending.
