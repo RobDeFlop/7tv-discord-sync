@@ -4,7 +4,7 @@ export type EmoteAddPreview = {
   originalName: string;
   image: EmojiImage;
 } & (
-  | { id: string; defaultName: string; importError?: never }
+  | { id: string; defaultName: string; slotNotice?: string; importError?: never }
   | { importError: string; id?: never; defaultName?: never }
 );
 

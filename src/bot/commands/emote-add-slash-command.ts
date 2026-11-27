@@ -45,7 +45,7 @@ export class EmoteAddSlashCommand extends SlashCommand {
     timer.unref();
     const { prepared } = preparation;
     this.pending.set(id, { serverId, userId: request.userId, prepared, expiresAt, timer });
-    return { id, originalName, defaultName: prepared.defaultName, image };
+    return { id, originalName, defaultName: prepared.defaultName, image, slotNotice: preparation.slotNotice };
   }
 
   public async handleInteraction(request: EmoteAddInteraction): Promise<void> {
