@@ -1,3 +1,4 @@
+import { FailureLog } from "./failure-log.ts";
 import type { SyncCore, Command } from "../core/index.ts";
 import { DomainError, type ServerId } from "../domain/index.ts";
 import { FeedbackRouter } from "./feedback-router.ts";
@@ -39,7 +40,7 @@ export abstract class SlashCommand {
       await request.reply(await (this.needsLock ? this.lock.run(server, run) : run()));
     } catch (err) {
       if (err instanceof DomainError) return request.reply(FeedbackRouter.format([err.toFeedback()]));
-      console.error(`/${this.path} failed in ${server}:`, err);
+      new FailureLog(err).write(`/${this.path} failed in ${server}:`);
       await request.reply("Something went wrong. Try again in a moment.");
     }
   }

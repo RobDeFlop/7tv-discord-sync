@@ -9,6 +9,7 @@ import {
 import type { ServerId } from "../domain/index.ts";
 import { DetailedSlashReply } from "./detailed-slash-reply.ts";
 import { DiscordJsEmoteAddInteraction } from "./discordjs-emote-add.ts";
+import { FailureLog } from "./failure-log.ts";
 import { LogChannel } from "./feedback-router.ts";
 import { ServerDirectory, type GatewayEvents } from "./gateway-events.ts";
 import type { SlashCommandRegistry } from "./slash-command-registry.ts";
@@ -142,7 +143,7 @@ export class DiscordBot {
       if (before.premiumTier !== after.premiumTier) void this.events.boostChanged(after.id);
     });
     c.on("interactionCreate", (interaction) => {
-      this.onInteraction(interaction).catch((e) => console.error("Interaction failed:", e));
+      this.onInteraction(interaction).catch((e) => new FailureLog(e).write("Interaction failed:"));
     });
   }
 
@@ -158,7 +159,7 @@ export class DiscordBot {
       await this.events.catchUp();
       console.log(`Ready as ${this.client.user?.tag}, caught up ${this.client.guilds.cache.size} Servers.`);
     } catch (err) {
-      console.error("Startup failed:", err);
+      new FailureLog(err).write("Startup failed:");
     }
   }
 }

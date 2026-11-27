@@ -1,3 +1,4 @@
+import { FailureLog } from "./failure-log.ts";
 import { AddEmoteCommand, type EmoteAddPreparation, type PreparedEmoteAdd, type SyncCore } from "../core/index.ts";
 import { EmoteNamer, type ServerId } from "../domain/index.ts";
 import type { EmoteAddInteraction } from "./emote-add-interaction.ts";
@@ -74,7 +75,7 @@ export class EmoteAddPreviews {
         return nextStep ? { ...message, text: `${message.text} Run \`/${pending.commandPath}\` again ${nextStep}` } : message;
       }));
     } catch (error) {
-      console.error(`/${pending.commandPath} confirmation failed in ${pending.serverId}:`, error);
+      new FailureLog(error).write(`/${pending.commandPath} confirmation failed in ${pending.serverId}:`);
       reply = `Something went wrong. Run \`/${pending.commandPath}\` again to retry.`;
     }
     await request.reply(reply);

@@ -51,10 +51,10 @@ Any Postgres database works. Create an empty database, for example `7tv_sync`, a
 
 ### 5. Configure
 
-Copy the example file and fill in your values:
+In a directory you control, create `.env` readable and writable only by your account before adding credentials (Linux/macOS). If it already exists, keep its contents:
 
 ```sh
-cp .example.env .env
+if [ -e .env ]; then chmod 600 .env; else install -m 600 .example.env .env; fi
 ```
 
 | Variable | Value |
@@ -62,7 +62,7 @@ cp .example.env .env
 | `DISCORD_TOKEN` | The bot token from step 2 |
 | `DATABASE_URL` | Your Postgres connection string, e.g. `postgres://user:password@localhost:5432/7tv_sync` |
 
-Bun loads `.env` automatically. `.env` is gitignored, so your token is never committed.
+Bun loads `.env` automatically. On Windows, restrict the file using account permissions. Keep `.env` private; do not share or commit it.
 
 ### 6. Run
 
