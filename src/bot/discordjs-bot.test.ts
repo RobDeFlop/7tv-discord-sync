@@ -3,6 +3,7 @@ import {
   MessageFlags,
   PermissionFlagsBits,
   PermissionsBitField,
+  type APIEmbed,
   type ChatInputCommandInteraction,
   type Client,
   type InteractionEditReplyOptions,
@@ -91,6 +92,14 @@ class LogChannelStatusFixture {
     return interaction.editReply.mock.calls[0]![0];
   }
 
+  public async status(): Promise<APIEmbed> {
+    const reply = await this.run("status");
+    expect(reply.content).toBeUndefined();
+    expect(reply.embeds).toHaveLength(1);
+    const embed = reply.embeds![0]!;
+    return "toJSON" in embed ? embed.toJSON() : embed;
+  }
+
   public async syncAndWait(): Promise<void> {
     await this.run("sync");
     await this.events.idle();
@@ -130,17 +139,19 @@ class LogChannelStatusFixture {
 test("private /status warns when the log channel denies Embed Links and clears when it grants it", async () => {
   const fixture = new LogChannelStatusFixture();
   await fixture.seed("chan-1");
-  const missing = await fixture.run("status");
-  expect(missing.content).toContain("Warning: I am missing Embed Links in <#chan-1>.");
-  expect(missing.content).toContain("Grant me Embed Links in that channel to restore sync feedback.");
+  const missing = await fixture.status();
+  expect(missing.title).toBe("Action needed");
+  expect(missing.description).toContain("Missing **Embed Links** in <#chan-1>.");
+  expect(missing.description).toContain("Grant it to the bot in that channel to restore sync feedback.");
   fixture.expectChannelLookup("chan-1");
   fixture.expectEffectivePermissionChecks(1);
   fixture.expectNoPublicPost();
 
   fixture.grantChannelEmbedLinksOnly();
-  const restored = await fixture.run("status");
-  expect(restored.content).toContain("Log channel: <#chan-1>");
-  expect(restored.content).not.toContain("Embed Links");
+  const restored = await fixture.status();
+  expect(restored.title).toBe("No action needed");
+  expect(restored.description).toBeUndefined();
+  expect(restored.fields?.find((field) => field.name === "Settings")?.value).toContain("Log channel: <#chan-1>");
   fixture.expectEffectivePermissionChecks(2);
   fixture.expectNoPublicPost();
 
@@ -155,18 +166,19 @@ test("a log channel permission read failure does not break /status or claim Embe
   const fixture = new LogChannelStatusFixture();
   await fixture.seed("chan-1");
   fixture.failChannelLookupOnce();
-  const status = await fixture.run("status");
+  const status = await fixture.status();
   fixture.expectChannelLookup("chan-1");
-  expect(status.content).toContain("Log channel: <#chan-1>");
-  expect(status.content).toContain("Write queue: idle");
-  expect(status.content).not.toContain("missing Embed Links");
+  expect(status.title).toBe("No action needed");
+  expect(status.fields?.find((field) => field.name === "Settings")?.value).toContain("Log channel: <#chan-1>");
+  expect(status.fields).toContainEqual({ name: "Write queue", value: "Idle" });
   fixture.expectNoPublicPost();
 });
 
 test("with no log channel, /status and /sync neither look up a channel nor post publicly", async () => {
   const fixture = new LogChannelStatusFixture();
   await fixture.seed(null);
-  expect((await fixture.run("status")).content).toContain("Log channel: not set");
+  const status = await fixture.status();
+  expect(status.fields?.find((field) => field.name === "Settings")?.value).toContain("Log channel: Not set");
   await fixture.syncAndWait();
   fixture.expectNoChannelLookup();
   fixture.expectNoPublicPost();
