@@ -1,18 +1,27 @@
-import type { LinkSourceSetCommand, SyncCore } from "../core/index.ts";
+import type { SyncCore, SyncObserver } from "../core/index.ts";
 import type { ServerId } from "../domain/index.ts";
-import type { GatewayEvents } from "./gateway-events.ts";
-import type { ServerLock } from "./server-lock.ts";
+import type { FeedbackRouter } from "./feedback-router.ts";
+import { Logger, LogLevel } from "./logger.ts";
 import { SlashCommand } from "./slash-command.ts";
+import type { SlashRequest } from "./slash-request.ts";
 
-/** Accept immediately; the background job, not the interaction, holds the Server lock. */
+/** Acknowledge before dispatching; the core owns when the sync runs. */
 export abstract class BackgroundSyncCommand extends SlashCommand {
-  protected override readonly needsLock = false;
-
-  public constructor(core: SyncCore, lock: ServerLock, private readonly events: GatewayEvents) {
-    super(core, lock);
+  public constructor(core: SyncCore, private readonly feedback: FeedbackRouter) {
+    super(core);
   }
 
-  protected queue(server: ServerId, link?: LinkSourceSetCommand): void {
-    this.events.requestSync(server, link);
+  protected override async run(server: ServerId, request: SlashRequest): Promise<void> {
+    await request.reply({ title: "Sync queued", description: "This private reply will be updated with the result." });
+    const observer = this.feedback.privateReply(request);
+    void this.schedule(server, request, observer).catch(async (error: unknown) => {
+      Logger.write(LogLevel.error, `sync_failed server=${server} operation=request error_kind=${error instanceof Error ? "Error" : typeof error}`);
+      await observer(server, {
+        kind: "finished",
+        result: { changes: [], feedback: [{ level: "error", text: "Could not queue this sync. Try again in a moment." }] },
+      });
+    });
   }
+
+  protected abstract schedule(server: ServerId, request: SlashRequest, observer: SyncObserver): Promise<unknown>;
 }

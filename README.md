@@ -94,8 +94,8 @@ A typical first setup:
 | `/set link <7tv user link>` | Mirror that user's active emote set (Source Set) |
 | `/set unlink <delete\|keep>` | Stop mirroring; delete the emotes or keep them as Reserved Slots |
 | `/trending <on\|off> [period]` | Fill free slots with trending emotes (day, week, month, all-time; default week) |
-| `/sync` | Queue a sync and confirm it privately |
-| `/status` | Slot usage, settings, problems and pending Discord writes |
+| `/sync` | Queue a sync and get the result in the same private reply |
+| `/status` | Slot usage, settings, problems, pending Discord writes and the latest sync summary |
 | `/config log-channel <channel>` | Where automatic sync messages are posted |
 
 In the private emote preview, choose **Add** to use the displayed name, **Choose name** to edit the original 7TV name and add on submission, or **Cancel** to leave without adding anything. Names must be 2–32 characters and use only letters (A–Z), numbers, and underscores. The suggested name may already include a numeric suffix. If your custom name is taken, or the displayed name becomes taken before confirmation, the bot rejects it rather than adding a suffix. If the preview expires, repeat `/emote add` or `/search`.
@@ -113,9 +113,11 @@ Discord limits static and animated emojis separately (50, 100, 150 or 250 each, 
 
 An emote higher in the list pushes out one lower in the list. Animated emotes are converted and shrunk to fit Discord's 256 KB limit. During sync, an emote that can't be shrunk enough is skipped and listed in `/status`.
 
-### Automatic syncs
+### Sync results
 
-The bot also syncs on its own when it joins a server, when emojis change, when the boost level changes, when the linked 7TV set changes, and once for every server at startup. Feedback from automatic and queued syncs goes to the configured log channel in embeds that separate results, warnings and errors. If there is no log channel or nothing to report, the bot does not post. Recorded problems remain visible in `/status`. Removing the bot from a server deletes that server's stored data; the emojis stay.
+`/sync`, `/set link`, and `/trending` acknowledge immediately in a private reply. The bot edits that same reply with the result, including any pause and resumption due to Discord rate limits. If Discord's roughly 15-minute edit window passes or the edit fails, the bot posts the result to the configured log channel. `/status` shows the latest sync summary since startup and any saved problems, even without a log channel.
+
+The bot also syncs on its own when it joins a Server, when emojis change, when the boost level changes, when the Source Set changes, and once for each Server at startup. Automatic sync feedback goes to the configured log channel. Removing the bot from a Server deletes that Server's stored data; the emojis stay.
 
 ## Development
 

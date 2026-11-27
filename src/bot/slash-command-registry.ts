@@ -11,9 +11,7 @@ import { StatusSlashCommand } from "./commands/status-slash-command.ts";
 import { SyncSlashCommand } from "./commands/sync-slash-command.ts";
 import { TrendingSlashCommand } from "./commands/trending-slash-command.ts";
 import type { EmoteAddInteraction } from "./emote-add-interaction.ts";
-import type { LogChannel } from "./feedback-router.ts";
-import type { GatewayEvents } from "./gateway-events.ts";
-import type { ServerLock } from "./server-lock.ts";
+import type { FeedbackRouter, LogChannel } from "./feedback-router.ts";
 import type { SlashCommand, SlashOption } from "./slash-command.ts";
 import type { SlashRequest } from "./slash-request.ts";
 
@@ -43,18 +41,18 @@ export class SlashCommandRegistry {
   private readonly commands: ReadonlyMap<string, SlashCommand>;
   private readonly previews: EmoteAddPreviews;
 
-  public constructor(core: SyncCore, lock: ServerLock, events: GatewayEvents, logChannel: LogChannel) {
-    this.previews = new EmoteAddPreviews(core, lock);
+  public constructor(core: SyncCore, feedback: FeedbackRouter, logChannel: LogChannel) {
+    this.previews = new EmoteAddPreviews(core);
     const all: SlashCommand[] = [
-      new EmoteAddSlashCommand(core, lock, this.previews),
-      new SearchSlashCommand(core, lock, this.previews),
-      new EmoteRemoveSlashCommand(core, lock),
-      new SetLinkSlashCommand(core, lock, events),
-      new SetUnlinkSlashCommand(core, lock),
-      new TrendingSlashCommand(core, lock, events),
-      new SyncSlashCommand(core, lock, events),
-      new StatusSlashCommand(core, lock, logChannel),
-      new ConfigLogChannelSlashCommand(core, lock),
+      new EmoteAddSlashCommand(core, this.previews),
+      new SearchSlashCommand(core, this.previews),
+      new EmoteRemoveSlashCommand(core),
+      new SetLinkSlashCommand(core, feedback),
+      new SetUnlinkSlashCommand(core),
+      new TrendingSlashCommand(core, feedback),
+      new SyncSlashCommand(core, feedback),
+      new StatusSlashCommand(core, logChannel),
+      new ConfigLogChannelSlashCommand(core),
     ];
     this.commands = new Map(all.map((c) => [c.path, c]));
   }

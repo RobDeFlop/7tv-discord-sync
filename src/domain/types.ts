@@ -125,6 +125,8 @@ export interface ServerStatus {
   /** False when the bot lacks Manage Expressions and so cannot change emojis. */
   manageExpressions: boolean;
   writeQueue: WriteQueueProgress;
+  /** Most recent background sync summary since the bot started, if any. */
+  lastSync?: { changeCount: number; retryAt?: number; feedback: FeedbackMessage[] };
   quotas: Record<Quota, TierUsage>;
   problems: Problem[];
   logChannelId: string | null;

@@ -7,25 +7,28 @@ import { ImagePipeline } from "../image/pipeline.ts";
 import { DiscordBot } from "./discordjs-bot.ts";
 import { FeedbackRouter } from "./feedback-router.ts";
 import { GatewayEvents } from "./gateway-events.ts";
-import { ServerLock } from "./server-lock.ts";
+import { Logger, LogLevel } from "./logger.ts";
 import { SlashCommandRegistry } from "./slash-command-registry.ts";
 
 /** Wires the production adapters from the config into the sync core and the bot surface. */
 export class Application {
   private readonly store: PostgresStore;
   private readonly bot: DiscordBot;
+  private readonly core: SyncCore;
+  private readonly unsubscribe: () => void;
 
   public constructor(private readonly config: Config) {
     const client = DiscordJsAdapter.createClient();
-    const lock = new ServerLock();
     this.store = new PostgresStore(config.databaseUrl);
     const sevenTv = new SevenTvAdapter(new ImagePipeline());
-    const core = new SyncCore(sevenTv, new DiscordJsAdapter(client), this.store);
+    this.core = new SyncCore(sevenTv, new DiscordJsAdapter(client), this.store, (server, operation, error) => {
+      Logger.write(LogLevel.error, `sync_failed server=${server} operation=${operation} error_kind=${error instanceof Error ? "Error" : typeof error}`);
+    });
     const logChannel = DiscordBot.logChannel(client);
-    const feedback = new FeedbackRouter(this.store, logChannel);
-    const events = new GatewayEvents(core, this.store, feedback, lock, DiscordBot.servers(client));
-    events.listenToSevenTv(sevenTv);
-    this.bot = new DiscordBot(client, events, new SlashCommandRegistry(core, lock, events, logChannel));
+    const feedback = new FeedbackRouter(this.core, logChannel);
+    const events = new GatewayEvents(this.core, feedback, DiscordBot.servers(client));
+    this.unsubscribe = events.listenToSevenTv(sevenTv);
+    this.bot = new DiscordBot(client, events, new SlashCommandRegistry(this.core, feedback, logChannel));
   }
 
   public async start(): Promise<void> {
@@ -35,7 +38,9 @@ export class Application {
   }
 
   public async stop(): Promise<void> {
+    this.unsubscribe();
     await this.bot.stop();
+    await this.core.stop();
     await this.store.close();
     process.exit(0);
   }

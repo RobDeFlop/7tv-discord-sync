@@ -1,5 +1,4 @@
 import {
-  DomainError,
   ServerQuotas,
   type EmojiImage,
   type FeedbackMessage,
@@ -11,7 +10,7 @@ import {
   type TierUsage,
   type Quota,
 } from "../domain/index.ts";
-import type { DiscordPort, SevenTvPort, StorePort } from "../ports/index.ts";
+import type { DiscordPort, SevenTvChange, SevenTvPort, StorePort } from "../ports/index.ts";
 import { AddEmoteCommand } from "./commands/add-emote-command.ts";
 import { RemoveEmoteCommand } from "./commands/remove-emote-command.ts";
 import { LinkSourceSetCommand } from "./commands/link-source-set-command.ts";
@@ -25,9 +24,12 @@ import { ServerSession } from "./server-session.ts";
 import { SlotAllocator } from "./slot-allocator.ts";
 import { SourceSetMirror } from "./source-set-mirror.ts";
 import { TrendingFill } from "./trending-fill.ts";
+import { SyncReport } from "./sync-report.ts";
+import { SyncScheduler, type SyncFailure, type SyncObserver } from "./sync-scheduler.ts";
 import type { SyncedServer } from "./synced-server.ts";
 
 export * from "./commands/index.ts";
+export type { SyncObserver, SyncUpdate } from "./sync-scheduler.ts";
 
 export type EmoteAddPreparation =
   | ({ emote: SevenTvEmote; previewImage: EmojiImage } & (
@@ -38,20 +40,24 @@ export type EmoteAddPreparation =
 
 /** The sync core's public interface. */
 export class SyncCore {
+  private readonly lock = new ServerLock();
   private readonly session: ServerSession;
   private readonly allocator = new SlotAllocator();
-  private readonly reconciler: Reconciler;
+  private readonly scheduler: SyncScheduler;
+  private readonly settingTasks = new Set<Promise<unknown>>();
 
-  public constructor(private readonly sevenTv: SevenTvPort, private readonly discord: DiscordPort, store: StorePort) {
-    this.session = new ServerSession(discord, store, new ServerLock());
-    this.reconciler = new Reconciler([
+  public constructor(
+    private readonly sevenTv: SevenTvPort,
+    private readonly discord: DiscordPort,
+    private readonly store: StorePort,
+    onSyncFailure: SyncFailure = () => {},
+  ) {
+    this.session = new ServerSession(discord, store);
+    const reconciler = new Reconciler([
       new QuotaShrink(), new SourceSetMirror(sevenTv, this.allocator), new TrendingFill(sevenTv, this.allocator),
     ]);
-  }
-
-  /** Validate a link before accepting a background sync; this does not mutate Server state. */
-  public async prepareSourceLink(link: string): Promise<LinkSourceSetCommand> {
-    return new LinkSourceSetCommand(await this.sevenTv.resolveUserLink(link));
+    this.scheduler = new SyncScheduler(this.lock, (server, report) =>
+      this.session.run(server, report, (synced) => reconciler.reconcile(synced, report)), onSyncFailure);
   }
 
   /** Prepare an emote preview without saving state or changing any Discord emojis. */
@@ -106,13 +112,8 @@ export class SyncCore {
     return { emote, previewImage: prepared.uploadImage, prepared, slotNotice };
   }
 
-  public async linkSourceSet(server: ServerId, link: string): Promise<SyncResult> {
-    try {
-      return await this.apply(server, await this.prepareSourceLink(link));
-    } catch (error) {
-      if (error instanceof DomainError) return { changes: [], feedback: [error.toFeedback()] };
-      throw error;
-    }
+  public linkSourceSet(server: ServerId, link: string, observer?: SyncObserver): Promise<SyncResult> {
+    return this.apply(server, new LinkSourceSetCommand(link, this.sevenTv), observer);
   }
 
   public addEmote(server: ServerId, source: string | PreparedEmoteAdd, name?: string): Promise<SyncResult> {
@@ -123,17 +124,73 @@ export class SyncCore {
     return this.apply(server, new RemoveEmoteCommand(name, this.sevenTv));
   }
 
-  /** Apply an admin command to a Server. Domain errors come back as feedback. */
-  public apply(server: ServerId, command: Command): Promise<SyncResult> {
-    return this.session.run(server, async (synced, report) => {
-      await command.execute(synced, report);
-      if (command.requestsSync) await this.reconciler.reconcile(synced, report);
+  /** Apply and persist a Command; settings join a scheduled sync only after their save succeeds. */
+  public async apply(server: ServerId, command: Command, observer?: SyncObserver): Promise<SyncResult> {
+    const committed = this.lock.run(server, async () => {
+      const report = new SyncReport();
+      let applied = false;
+      await this.session.run(server, report, async (synced) => {
+        await command.execute(synced, report);
+        applied = true;
+      });
+      const result = report.toResult();
+      const completion = applied && command.requestsSync
+        ? this.scheduler.request(server, observer && ((target, update) => observer(target, update, result.feedback)))
+        : undefined;
+      return { result, completion };
+    }).then(async ({ result, completion }) => {
+      if (!completion && observer) await observer(server, { kind: "finished", result });
+      return { result, completion };
     });
+    if (command.requestsSync) {
+      this.settingTasks.add(committed);
+      const remove = () => this.settingTasks.delete(committed);
+      void committed.then(remove, remove);
+    }
+    const { result, completion } = await committed;
+    if (!completion || observer) return result;
+
+    const done = await completion;
+    if (done.error) throw done.error.cause;
+    return { changes: done.result.changes, feedback: [...result.feedback, ...done.result.feedback] };
   }
 
-  /** Bring a Server's emojis in line with 7TV and the stored state. */
-  public reconcile(server: ServerId): Promise<SyncResult> {
-    return this.session.run(server, (synced, report) => this.reconciler.reconcile(synced, report));
+  /** Queue a sync. Observers receive retry notices and the final result. */
+  public async reconcile(server: ServerId, observer?: SyncObserver): Promise<SyncResult> {
+    const { result, error } = await this.scheduler.request(server, observer);
+    if (error && !observer) throw error.cause;
+    return result;
+  }
+
+  public storedServers(): Promise<ServerId[]> {
+    return this.store.listServers();
+  }
+
+  public async serversFollowing(change: SevenTvChange): Promise<ServerId[]> {
+    const targets: ServerId[] = [];
+    for (const server of await this.storedServers()) {
+      const linked = (await this.store.load(server)).linkedUserId;
+      if (linked !== null && (change.type !== "active-set-switched" || linked === change.userId)) targets.push(server);
+    }
+    return targets;
+  }
+
+  public async logChannelId(server: ServerId): Promise<string | null> {
+    return (await this.store.load(server)).logChannelId;
+  }
+
+  public removeServer(server: ServerId): Promise<void> {
+    this.scheduler.cancel(server);
+    return this.lock.run(server, () => this.store.remove(server));
+  }
+
+  public async syncIdle(): Promise<void> {
+    while (this.settingTasks.size) await Promise.allSettled([...this.settingTasks]);
+    await this.scheduler.idle();
+  }
+
+  public stop(): Promise<void> {
+    return this.scheduler.stop();
   }
 
   /** Used/free slots per quota and tier, plus problems. */
@@ -141,7 +198,9 @@ export class SyncCore {
     const synced = await this.session.load(server);
     const quotas = await synced.quotas();
     const { state } = synced;
+    const last = this.scheduler.lastUpdate(server);
     return {
+      ...(last ? { lastSync: last } : {}),
       manageExpressions: await this.discord.hasManageExpressions(server),
       writeQueue: this.discord.queueProgress(server),
       quotas: {

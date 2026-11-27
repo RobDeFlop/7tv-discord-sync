@@ -39,4 +39,6 @@ docker compose -f compose.external.yaml logs -f bot
 
 Only the bot starts. To stop it, run `docker compose -f compose.external.yaml down`. Your database is managed separately.
 
-Once the bot is online, run `/status` in Discord to check your server. Global slash commands can take a few minutes to appear the first time.
+Once the bot is online, run `/status` in Discord to check your Server. Global slash commands can take a few minutes to appear the first time.
+
+`/sync`, `/set link`, and `/trending` queue a sync and update their original private reply with the result. If that reply can no longer be edited, check the configured log channel or the latest sync summary in `/status`.

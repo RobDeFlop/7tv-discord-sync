@@ -3,7 +3,6 @@ import { EmoteNamer, type ServerId } from "../domain/index.ts";
 import type { EmoteAddInteraction } from "./emote-add-interaction.ts";
 import { FeedbackRouter } from "./feedback-router.ts";
 import { Logger, LogLevel } from "./logger.ts";
-import type { ServerLock } from "./server-lock.ts";
 import type { SlashReply } from "./slash-request.ts";
 
 interface PendingEmoteAdd {
@@ -19,7 +18,7 @@ export class EmoteAddPreviews {
   private static readonly PREVIEW_TTL_MS = 5 * 60_000;
   private readonly pending = new Map<string, PendingEmoteAdd>();
 
-  public constructor(private readonly core: SyncCore, private readonly lock: ServerLock) {}
+  public constructor(private readonly core: SyncCore) {}
 
   public open(serverId: ServerId, userId: string, commandPath: string, preparation: EmoteAddPreparation): SlashReply {
     if ("feedback" in preparation) return FeedbackRouter.format([preparation.feedback]);
@@ -65,9 +64,7 @@ export class EmoteAddPreviews {
     await request.defer();
     let reply: string;
     try {
-      const { feedback } = await this.lock.run(pending.serverId, () =>
-        this.core.addEmote(pending.serverId, pending.prepared, name),
-      );
+      const { feedback } = await this.core.addEmote(pending.serverId, pending.prepared, name);
       reply = FeedbackRouter.format(feedback.map((message) => {
         const nextStep = message.reason === "emote-name-taken" ? "and choose another name."
           : message.reason === "emote-name-changed" ? "to review the name."

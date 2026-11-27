@@ -37,6 +37,10 @@ export class DiscordJsSlashRequest extends SlashRequest {
     return this.interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
   }
 
+  public get createdAt(): number {
+    return this.interaction.createdTimestamp;
+  }
+
   public get userId(): string {
     return this.interaction.user.id;
   }
@@ -65,6 +69,13 @@ export class DiscordJsSlashRequest extends SlashRequest {
     else if (this.replied || this.interaction.replied) await this.interaction.followUp({ ...options, flags: MessageFlags.Ephemeral });
     else await this.interaction.reply({ ...options, flags: MessageFlags.Ephemeral });
     this.replied = true;
+  }
+
+  public async editOriginal(text: string): Promise<void> {
+    await this.interaction.editReply({
+      content: text.slice(0, DiscordJsSlashRequest.MAX_MESSAGE).toWellFormed(),
+      embeds: [], components: [], allowedMentions: { parse: [] },
+    });
   }
 }
 

@@ -1,13 +1,12 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import type { APIEmbed } from "discord.js";
-import { SyncCore } from "../core/index.ts";
+import { Command, SyncCore } from "../core/index.ts";
 import type { ServerId } from "../domain/index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore, MAX_EMOJI_BYTES } from "../testing/fakes.ts";
 import { EmoteAddInteraction, type EmoteAddAction, type EmoteAddPreview } from "./emote-add-interaction.ts";
 import { FeedbackRouter } from "./feedback-router.ts";
 import { GatewayEvents } from "./gateway-events.ts";
 import { FakeLogChannel, FakeServers } from "../testing/bot-fakes.ts";
-import { ServerLock } from "./server-lock.ts";
 import { SlashCommandRegistry } from "./slash-command-registry.ts";
 import { SlashRequest, type SlashReply } from "./slash-request.ts";
 
@@ -16,6 +15,8 @@ const EMOTE_LINK = "https://7tv.app/emotes/e1";
 
 class FakeRequest extends SlashRequest {
   private readonly replyHistory: SlashReply[] = [];
+  private readonly editHistory: string[] = [];
+  public editError?: Error;
   public deferred = false;
   public readonly userId = "admin";
 
@@ -24,6 +25,7 @@ class FakeRequest extends SlashRequest {
     private readonly options: Record<string, string | boolean> = {},
     public readonly serverId: ServerId | null = S,
     public readonly isAdministrator = true,
+    public readonly createdAt = Date.now(),
   ) {
     super();
   }
@@ -44,6 +46,15 @@ class FakeRequest extends SlashRequest {
 
   public async reply(reply: SlashReply): Promise<void> {
     this.replyHistory.push(structuredClone(reply));
+  }
+
+  public async editOriginal(text: string): Promise<void> {
+    if (this.editError) throw this.editError;
+    this.editHistory.push(text);
+  }
+
+  public get edits(): readonly string[] {
+    return [...this.editHistory];
   }
 
   public get replies(): ReadonlyArray<SlashReply> {
@@ -133,10 +144,10 @@ function setup() {
   sevenTv.addUser({ id: "u1", username: "streamer", activeSetId: "setA" });
   sevenTv.addEmote({ id: "e1", name: "Pog", animated: false });
   sevenTv.setEmotes("setA", "A", ["e1"]);
-  const lock = new ServerLock();
   const log = new FakeLogChannel();
-  const events = new GatewayEvents(core, store, new FeedbackRouter(store, log), lock, new FakeServers());
-  const registry = new SlashCommandRegistry(core, lock, events, log);
+  const feedback = new FeedbackRouter(core, log);
+  const events = new GatewayEvents(core, feedback, new FakeServers());
+  const registry = new SlashCommandRegistry(core, feedback, log);
   const run = async (path: string, options: Record<string, string | boolean> = {}) => {
     const req = new FakeRequest(path, options);
     await registry.handle(req);
@@ -152,7 +163,7 @@ function setup() {
     await registry.handleEmoteAddInteraction(request);
     return request;
   };
-  return { discord, sevenTv, store, core, lock, registry, run, openPreview, interact, events, log };
+  return { discord, sevenTv, store, core, registry, run, openPreview, interact, events, log };
 }
 
 describe("access", () => {
@@ -298,13 +309,15 @@ describe("/emote add preview", () => {
   });
 
   test("Add rechecks the displayed name under the Server lock and won't import under a suffix", async () => {
-    const { discord, store, lock, openPreview, interact } = setup();
+    const { discord, store, core, openPreview, interact } = setup();
     const { id, defaultName } = await openPreview();
     const gate = Promise.withResolvers<void>();
-    const busy = lock.run(S, async () => {
-      await gate.promise;
-      discord.seedEmoji(S, { name: defaultName, animated: false });
-    });
+    const busy = core.apply(S, new class extends Command {
+      public override async execute(): Promise<void> {
+        await gate.promise;
+        discord.seedEmoji(S, { name: defaultName, animated: false });
+      }
+    }());
     const confirmation = interact(id, { kind: "add" });
     gate.resolve();
     await busy;
@@ -404,7 +417,7 @@ describe("/emote add preview", () => {
     { kind: "add" },
     { kind: "submit", name: "Poggers" },
   ] as const)("a Discord fallback preview rejects $kind for a replacement emoji with the same name", async (action) => {
-    const { discord, sevenTv, store, core, lock, run, events, openPreview, interact } = setup();
+    const { discord, sevenTv, store, core, run, events, openPreview, interact } = setup();
     await run("set link", { link: "https://7tv.app/users/u1" });
     await events.idle();
     const mirrored = discord.emojis(S)[0]!;
@@ -412,11 +425,9 @@ describe("/emote add preview", () => {
     const preview = await openPreview();
     if (action.kind === "submit") await interact(preview.id, { kind: "name" });
 
-    await lock.run(S, async () => {
-      discord.removeEmojiByHand(S, mirrored.id);
-      sevenTv.setImageSize("e1", 1024);
-      await core.reconcile(S);
-    });
+    discord.removeEmojiByHand(S, mirrored.id);
+    sevenTv.setImageSize("e1", 1024);
+    await core.reconcile(S);
     const replacement = discord.emojis(S)[0]!;
     expect(replacement.id).not.toBe(mirrored.id);
     expect(replacement.name).toBe(preview.defaultName);
@@ -622,55 +633,81 @@ describe("commands translate to core calls", () => {
   test("/set link mirrors the Source Set, /set unlink deletes or keeps its emotes", async () => {
     const { discord, run, events, log } = setup();
     await run("config log-channel", { channel: "log" });
-    expect((await run("set link", { link: "nope" })).text).toContain("not a valid 7TV");
-    expect((await run("set link", { link: "https://7tv.app/users/u1" })).text).toContain("queued");
+    const invalid = await run("set link", { link: "nope" });
+    const link = await run("set link", { link: "https://7tv.app/users/u1" });
+    expect(link.embed.title).toBe("Sync queued");
     await events.idle();
-    expect(log.sent[0]?.embeds[0]?.description).toContain("Linked streamer");
+    expect(invalid.edits.at(-1)).toContain("not a valid 7TV");
+    expect(link.edits.at(-1)).toContain("Linked streamer");
+    expect(link.edits.at(-1)).toContain("Added Pog.");
+    expect(log.sent).toEqual([]);
     expect(discord.emojis(S).map((e) => e.name)).toEqual(["Pog"]);
     await run("set unlink", { emotes: "delete" });
     expect(discord.emojis(S)).toEqual([]);
   });
 
   test("/set unlink keep leaves the emotes as Reserved Slots", async () => {
-    const { discord, run } = setup();
+    const { discord, run, events } = setup();
     await run("set link", { link: "https://7tv.app/users/u1" });
+    await events.idle();
     await run("set unlink", { emotes: "keep" });
     expect(discord.emojis(S).map((e) => e.name)).toEqual(["Pog"]);
   });
 
-  test("/trending on|off with a period", async () => {
-    const { run } = setup();
-    expect((await run("trending", { state: "on", period: "month" })).text).toContain("Trending Fill is on (month)");
-    expect((await run("trending", { state: "off" })).text).toContain("Trending Fill is off");
+  test("/trending on|off applies the validated period and edits the original reply", async () => {
+    const { core, run, events } = setup();
+    const enabled = await run("trending", { state: "on", period: "month" });
+    await events.idle();
+    expect(enabled.edits.at(-1)).toContain("Trending Fill is on (month)");
+    const invalid = await run("trending", { state: "on", period: "year" });
+    await events.idle();
+    expect(invalid.edits.at(-1)).toContain("Choose a Trending Fill period");
+    expect((await core.status(S)).trending.period).toBe("month");
+    const disabled = await run("trending", { state: "off" });
+    await events.idle();
+    expect(disabled.edits.at(-1)).toContain("Trending Fill is off");
   });
 
-  test("status, sync and set link reply while a Server write is blocked", async () => {
-    const { lock, discord, events, log, run } = setup();
+  test("status and all three queued commands acknowledge while a Server write is blocked", async () => {
+    const { core, discord, events, log, run } = setup();
     await run("config log-channel", { channel: "log" });
-    const gate = Promise.withResolvers<void>();
-    const busy = lock.run(S, () => gate.promise);
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const createEmoji = discord.createEmoji.bind(discord);
+    const create = spyOn(discord, "createEmoji").mockImplementationOnce(async (server, emoji) => {
+      started.resolve();
+      await release.promise;
+      return createEmoji(server, emoji);
+    });
+    const busy = core.linkSourceSet(S, "https://7tv.app/users/u1");
+    await started.promise;
+    const requests = Promise.all([
+      run("status"), run("sync"), run("set link", { link: "https://7tv.app/users/u1" }),
+      run("trending", { state: "on" }),
+    ]);
     try {
       discord.setQueueProgress(S, { pending: 1, retryingAt: null });
-      const requests = Promise.all([
-        run("status"), run("sync"), run("set link", { link: "https://7tv.app/users/u1" }),
-      ]);
       const replies = await Promise.race([requests, Bun.sleep(150).then(() => null)]);
       expect(replies?.[0]?.embed.fields).toContainEqual({ name: "Write queue", value: "1 write pending" });
-      expect(replies?.[1]?.replies).toEqual([{
-        title: "Sync queued",
-        description: "Check `/status` for pending writes or the configured log channel for results.",
-      }]);
-      expect(replies?.[2]?.text).toContain("queued");
+      for (const reply of replies?.slice(1) ?? []) {
+        expect(reply.embed.title).toBe("Sync queued");
+        expect(reply.edits).toHaveLength(0);
+      }
       expect(discord.emojis(S)).toEqual([]);
       expect(log.sent).toEqual([]);
     } finally {
-      gate.resolve();
+      release.resolve();
       await busy;
       await events.idle();
+      create.mockRestore();
     }
+    const [, sync, link, trending] = await requests;
+    expect(sync.edits.at(-1)).toContain("Sync complete");
+    expect(link.edits.at(-1)).toContain("Linked streamer");
+    expect(trending.edits.at(-1)).toContain("Trending Fill is on");
   });
 
-  test("/sync posts its results and warnings to the configured log channel", async () => {
+  test("/sync edits its private reply with warnings instead of posting publicly", async () => {
     const { sevenTv, run, events, log } = setup();
     await run("set link", { link: "https://7tv.app/users/u1" });
     await events.idle();
@@ -678,15 +715,71 @@ describe("commands translate to core calls", () => {
     sevenTv.setImageSize("e2", 10 * 1024 * 1024);
     sevenTv.setEmotes("setA", "A", ["e1", "e2"]);
     await run("config log-channel", { channel: "log" });
-    await run("sync");
+    const request = await run("sync");
     await events.idle();
-    expect(log.sent).toEqual([{
-      channelId: "log",
-      embeds: [
-        { title: "Sync results", description: "Sync complete: 0 emoji changes." },
-        { title: "Sync warnings", description: "Big is still over 256 KB after conversion and was skipped." },
-      ],
-    }]);
+    expect(request.edits.at(-1)).toContain("Big is still over 256 KB after conversion and was skipped.");
+    expect(log.sent).toEqual([]);
+  });
+
+  test("coalesced syncs update each original private reply", async () => {
+    const { core, discord, events, run } = setup();
+    const gate = Promise.withResolvers<void>();
+    const busy = core.apply(S, new class extends Command {
+      public override execute(): Promise<void> { return gate.promise; }
+    }());
+    const list = spyOn(discord, "listEmojis");
+    try {
+      const [first, second] = await Promise.all([run("sync"), run("sync")]);
+      expect(first.embed.title).toBe("Sync queued");
+      expect(second.embed.title).toBe("Sync queued");
+      gate.resolve();
+      await busy;
+      await events.idle();
+      expect(first.edits).toEqual(["Sync complete: 0 emoji changes."]);
+      expect(second.edits).toEqual(first.edits);
+      expect(list).toHaveBeenCalledTimes(2); // the blocking Command and one reconcile
+    } finally {
+      gate.resolve();
+      await busy;
+      list.mockRestore();
+    }
+  });
+
+  test("expired and failed edits for the same sync fall back to one log post", async () => {
+    const { core, discord, events, log, registry, run } = setup();
+    await run("config log-channel", { channel: "log" });
+    const gate = Promise.withResolvers<void>();
+    const busy = core.apply(S, new class extends Command {
+      public override execute(): Promise<void> { return gate.promise; }
+    }());
+    const now = Date.now();
+    const expired = new FakeRequest("sync", {}, S, true, now - 14 * 60_000);
+    const failed = new FakeRequest("sync", {}, S, true, now);
+    failed.editError = new Error("interaction token private-token");
+    const logs = spyOn(console, "error").mockImplementation(() => {});
+    const clock = spyOn(Date, "now");
+    try {
+      await Promise.all([registry.handle(expired), registry.handle(failed)]);
+      clock.mockReturnValue(now + 61_000);
+      discord.revokeManageExpressions(S);
+      gate.resolve();
+      await busy;
+      await events.idle();
+      expect(expired.edits).toEqual([]);
+      expect(failed.edits).toEqual([]);
+      expect(log.sent).toHaveLength(1);
+      expect(log.sent[0]?.embeds[0]?.description).toContain("Manage Expressions");
+      expect(logs.mock.calls.flat().join("\n")).toContain("sync_reply_edit_failed");
+      expect(logs.mock.calls.flat().join("\n")).not.toContain("private-token");
+      const { embed } = await run("status");
+      expect(embed.fields?.find((field) => field.name === "Latest sync")?.value).toContain("Manage Expressions");
+    } finally {
+      clock.mockRestore();
+      logs.mockRestore();
+      gate.resolve();
+      await busy;
+      await events.idle();
+    }
   });
 
   test("without a log channel a /sync problem is recorded for /status but not posted", async () => {
@@ -757,6 +850,7 @@ describe("/status", () => {
       ["Animated Slots", "1/50 used\nReserved Slots: 0\nRequested Emotes: 1\nSource Set: 0\nTrending Fill: 0"],
       ["Settings", "Linked 7TV user: u1\nTrending Fill: On (month)\nLog channel: <#1234>"],
       ["Write queue", "4 writes pending. Rate limited by Discord; retrying <t:2000000030:R>."],
+      ["Latest sync", expect.stringMatching(/\d+ emoji changes\./)],
     ]);
   });
 

@@ -1,8 +1,7 @@
 import { escapeMarkdown, type APIEmbed, type APIEmbedField } from "discord.js";
 import type { SyncCore } from "../../core/index.ts";
 import type { Problem, ServerId, ServerStatus, TierUsage, WriteQueueProgress } from "../../domain/index.ts";
-import type { LogChannel } from "../feedback-router.ts";
-import type { ServerLock } from "../server-lock.ts";
+import { FeedbackRouter, type LogChannel } from "../feedback-router.ts";
 import { SlashCommand } from "../slash-command.ts";
 
 /** /status */
@@ -13,10 +12,8 @@ export class StatusSlashCommand extends SlashCommand {
   public readonly path = "status";
   public readonly description = "Show whether action is needed, slot usage, settings and pending writes";
 
-  protected override readonly needsLock = false;
-
-  public constructor(core: SyncCore, lock: ServerLock, private readonly logChannel: LogChannel) {
-    super(core, lock);
+  public constructor(core: SyncCore, private readonly logChannel: LogChannel) {
+    super(core);
   }
 
   protected async run(server: ServerId): Promise<APIEmbed> {
@@ -54,9 +51,17 @@ export class StatusSlashCommand extends SlashCommand {
           ].join("\n"),
         },
         { name: "Write queue", value: StatusSlashCommand.queue(status.writeQueue) },
+        ...(status.lastSync ? [{ name: "Latest sync", value: StatusSlashCommand.latestSync(status.lastSync) }] : []),
         ...(status.problems.length ? [{ name: "Problems", value: StatusSlashCommand.problems(status.problems) }] : []),
       ],
     };
+  }
+
+  private static latestSync(last: NonNullable<ServerStatus["lastSync"]>): string {
+    const lines = [`${last.changeCount} emoji changes.`];
+    if (last.retryAt !== undefined) lines.push(`Resume scheduled <t:${Math.floor(last.retryAt / 1000)}:R>.`);
+    if (last.feedback.length) lines.push(FeedbackRouter.format(last.feedback));
+    return lines.join("\n").slice(0, StatusSlashCommand.MAX_FIELD_VALUE).toWellFormed();
   }
 
   private static usage(name: string, usage: TierUsage): APIEmbedField {
