@@ -1,23 +1,100 @@
 # 7tv-discord-sync
 
-A Discord bot that keeps a server's emojis in sync with emotes from [7TV](https://7tv.app). Sync is one-way, from 7TV to Discord. See `GLOSSARY.md` for the vocabulary.
+A Discord bot that keeps your server's emojis in sync with emotes from [7TV](https://7tv.app).
 
-- Mirror a 7TV user's active emote set and follow it when they switch sets.
-- Add single 7TV emotes by link.
-- Optionally fill leftover slots with trending emotes.
-- Emojis you uploaded yourself are never touched.
+Point it at a 7TV user and their active emote set shows up as Discord emojis. When they add, remove or switch sets, the bot follows. You can also import single emotes by link or search, and fill leftover slots with trending emotes. Emojis you uploaded yourself are never touched.
 
-## Install with Docker Compose
+Sync is one-way, from 7TV to Discord. The terms used here (Source Set, Requested Emote, Reserved Slot and so on) are defined in the [glossary](GLOSSARY.md).
 
-Start at the public [container package page](https://github.com/users/RobDeFlop/packages/container/package/7tv-discord-sync). Its description explains how to copy the [operator install guide](install/README.md), Compose files and example environment from the release image without a clone or login. Choose bundled PostgreSQL (default) or your existing database. For a source install instead, follow the steps below.
+## Contents
 
-## Source install requirements
+- [Features](#features)
+- [Quick start](#quick-start)
+- [Using the bot](#using-the-bot)
+- [Install from source](#install-from-source)
+- [Development](#development)
+- [Contributing](#contributing)
+
+## Features
+
+- **Mirror a 7TV emote set.** Link a 7TV user and the bot mirrors their active set, following them when they switch sets.
+- **Add single emotes.** Paste a 7TV link or search the public catalog, preview the emote privately, then add it under its own or a custom name.
+- **Trending fill.** Optionally use free slots for trending emotes by day, week, month or all time.
+- **Respects your own emojis.** Emojis you uploaded are Reserved Slots: the bot never renames, deletes or displaces them.
+- **Fits Discord's limits.** Animated emotes are converted and shrunk to Discord's 256 KB limit, and slots are shared by a fixed priority when they run out.
+- **Clear feedback.** Results arrive as colour-coded cards in your private reply or a log channel, and `/status` shows slot usage and problems at any time.
+
+## Quick start
+
+The recommended install is Docker Compose with a published image. You don't need Bun or a clone.
+
+Start at the [container package page](https://github.com/users/RobDeFlop/packages/container/package/7tv-discord-sync). Its description explains how to copy the [operator install guide](install/README.md), Compose files and example environment from the release image without logging in. You can use bundled PostgreSQL (default) or your existing database.
+
+Once the bot is running and invited, set it up in Discord:
+
+1. `/config log-channel #bot-log`: where messages from automatic syncs are posted.
+2. `/set link https://7tv.app/users/<id>`: mirror that user's active emote set.
+3. `/trending on`: optionally fill the remaining free slots with trending emotes.
+4. `/status`: check slot usage and any problems.
+
+To run from source instead, see [Install from source](#install-from-source).
+
+## Using the bot
+
+All commands are for administrators only, and only you see the replies.
+
+### Commands
+
+| Command | What it does |
+| --- | --- |
+| `/search <name>` | Preview the highest-ranked exact name match in the public 7TV catalog, then confirm to import |
+| `/emote add <link>` | Preview a 7TV emote, then add it as a Requested Emote |
+| `/emote remove <name>` | Remove an emoji the bot created |
+| `/set link <7tv user link>` | Mirror that user's active emote set (Source Set) |
+| `/set unlink <delete\|keep>` | Stop mirroring; delete the emotes or keep them as Reserved Slots |
+| `/trending <on\|off> [period]` | Fill free slots with trending emotes (day, week, month, all-time; default week) |
+| `/sync` | Queue a sync and get the result in the same private reply |
+| `/status` | Slot usage, settings, problems, pending Discord writes and the latest sync summary |
+| `/config log-channel <channel>` | Where automatic sync messages are posted |
+
+### Adding single emotes
+
+In the private emote preview, choose **Add** to use the displayed name, **Choose name** to edit the original 7TV name and add on submission, or **Cancel** to leave without adding anything.
+
+Names must be 2–32 characters and use only letters (A–Z), numbers, and underscores. The suggested name may already include a numeric suffix. If your custom name is taken, or the displayed name becomes taken before confirmation, the bot rejects it rather than adding a suffix. If the preview expires, repeat `/emote add` or `/search`.
+
+When an oversized image cannot be imported, the private preview explains Discord's 256 KB limit without adding a problem to `/status`.
+
+### How slots are shared
+
+Discord limits static and animated emojis separately (50, 100, 150 or 250 each, depending on boost level). When slots run out, they go in this order:
+
+1. Emojis you uploaded yourself (never changed by the bot)
+2. Emotes added with `/emote add` or `/search`
+3. The mirrored 7TV set
+4. Trending emotes
+
+An emote higher in the list pushes out one lower in the list. Animated emotes are converted and shrunk to fit Discord's 256 KB limit. During sync, an emote that can't be shrunk enough is skipped and listed in `/status`.
+
+### Sync results
+
+Results arrive as colour-coded cards: green when everything worked, amber for warnings or a rate-limit pause, red when something failed. Added, removed, renamed and kept emojis are listed separately. Where the bot lacks **Embed Links**, the same card is sent as plain text.
+
+`/sync`, `/set link`, and `/trending` acknowledge immediately in a private reply. The bot edits that same reply with the result, including any pause and resumption due to Discord rate limits. If Discord's roughly 15-minute edit window passes or the edit fails, the bot posts the result to the configured log channel. `/status` shows the latest sync summary since startup and any saved problems, even without a log channel. Automatic syncs that have nothing to report do not replace that summary.
+
+### Automatic syncs
+
+The bot also syncs on its own when it joins a Server, when emojis change, when the boost level changes, when the Source Set changes, and once for each Server at startup. Automatic sync feedback goes to the configured log channel.
+
+Removing the bot from a Server deletes that Server's stored data; the emojis stay.
+
+## Install from source
+
+### Requirements
 
 - [Bun](https://bun.sh) 1.4 or newer
 - A Postgres database (local or hosted, e.g. Neon or Supabase)
 - A Discord application with a bot
-
-## Setup
 
 ### 1. Get the code
 
@@ -71,59 +148,9 @@ Bun loads `.env` automatically. On Windows, restrict the file using account perm
 bun run start
 ```
 
-On startup the bot applies the database migrations, registers its slash commands and syncs every server it is in. Slash commands are registered globally, so the first time they can take a few minutes to show up in Discord.
-
-## Using the bot
-
-All commands are for administrators only, and only you see the replies.
-
-A typical first setup:
-
-1. `/config log-channel #bot-log`: where messages from automatic syncs are posted.
-2. `/set link https://7tv.app/users/<id>`: mirror that user's active emote set.
-3. `/trending on`: optionally fill the remaining free slots with trending emotes.
-4. `/status`: check slot usage and any problems.
-
-### Commands
-
-| Command | What it does |
-| --- | --- |
-| `/search <name>` | Preview the highest-ranked exact name match in the public 7TV catalog, then confirm to import |
-| `/emote add <link>` | Preview a 7TV emote, then add it as a Requested Emote |
-| `/emote remove <name>` | Remove an emoji the bot created |
-| `/set link <7tv user link>` | Mirror that user's active emote set (Source Set) |
-| `/set unlink <delete\|keep>` | Stop mirroring; delete the emotes or keep them as Reserved Slots |
-| `/trending <on\|off> [period]` | Fill free slots with trending emotes (day, week, month, all-time; default week) |
-| `/sync` | Queue a sync and get the result in the same private reply |
-| `/status` | Slot usage, settings, problems, pending Discord writes and the latest sync summary |
-| `/config log-channel <channel>` | Where automatic sync messages are posted |
-
-In the private emote preview, choose **Add** to use the displayed name, **Choose name** to edit the original 7TV name and add on submission, or **Cancel** to leave without adding anything. Names must be 2–32 characters and use only letters (A–Z), numbers, and underscores. The suggested name may already include a numeric suffix. If your custom name is taken, or the displayed name becomes taken before confirmation, the bot rejects it rather than adding a suffix. If the preview expires, repeat `/emote add` or `/search`.
-
-When an oversized image cannot be imported, the private preview explains Discord's 256 KB limit without adding a problem to `/status`.
-
-### How slots are shared
-
-Discord limits static and animated emojis separately (50, 100, 150 or 250 each, depending on boost level). When slots run out, they go in this order:
-
-1. Emojis you uploaded yourself (never changed by the bot)
-2. Emotes added with `/emote add` or `/search`
-3. The mirrored 7TV set
-4. Trending emotes
-
-An emote higher in the list pushes out one lower in the list. Animated emotes are converted and shrunk to fit Discord's 256 KB limit. During sync, an emote that can't be shrunk enough is skipped and listed in `/status`.
-
-### Sync results
-
-Results arrive as colour-coded cards: green when everything worked, amber for warnings or a rate-limit pause, red when something failed. Added, removed, renamed and kept emojis are listed separately. Where the bot lacks **Embed Links**, the same card is sent as plain text.
-
-`/sync`, `/set link`, and `/trending` acknowledge immediately in a private reply. The bot edits that same reply with the result, including any pause and resumption due to Discord rate limits. If Discord's roughly 15-minute edit window passes or the edit fails, the bot posts the result to the configured log channel. `/status` shows the latest sync summary since startup and any saved problems, even without a log channel. Automatic syncs that have nothing to report do not replace that summary.
-
-The bot also syncs on its own when it joins a Server, when emojis change, when the boost level changes, when the Source Set changes, and once for each Server at startup. Automatic sync feedback goes to the configured log channel. Removing the bot from a Server deletes that Server's stored data; the emojis stay.
+On startup the bot applies the database migrations, registers its slash commands and syncs every server it is in. Slash commands are registered globally, so the first time they can take a few minutes to show up in Discord. Then follow the Discord setup steps in [Quick start](#quick-start).
 
 ## Development
-
-Maintainers: see [Publishing the GHCR image](docs/publishing.md) for the release tag policy, one-time package setup, and anonymous pull check.
 
 ```sh
 bun test            # run the tests
@@ -132,6 +159,8 @@ bun run db:generate # regenerate migrations after a schema change (needs DATABAS
 ```
 
 With Docker Compose available, `bash scripts/test-compose.sh` checks both operator install paths using a local image and disposable databases. It does not require a Discord token or a published image.
+
+Maintainers: see [Publishing the GHCR image](docs/publishing.md) for the release tag policy, one-time package setup, and anonymous pull check.
 
 ### Run the development bot in Docker
 
@@ -157,6 +186,8 @@ Set `DATABASE_URL=postgres://sync:sync_local@127.0.0.1:5433/7tv_sync` in `.env` 
 
 Run `docker compose stop postgres` to stop the development database without deleting its data.
 
+### Store tests
+
 The store tests ignore `DATABASE_URL`. They migrate the database and delete test rows, so run them against a separate disposable instance (Bash):
 
 ```sh
@@ -167,4 +198,8 @@ TEST_DATABASE_URL=postgres://postgres:test-only@127.0.0.1:55432/postgres bun tes
 docker stop 7tv-sync-test-db
 ```
 
-Coding standards are in `docs/agents/coding-standards.md`. In conditions, use booleans directly or negate them with `!` rather than comparing them to `true` or `false`. Check for `null` explicitly when it represents a distinct unknown state.
+## Contributing
+
+Specs, requests and progress are tracked in [GitHub Issues](https://github.com/RobDeFlop/7tv-discord-sync/issues). Contributor and agent rules, including architecture and TypeScript standards, are in [AGENTS.md](AGENTS.md); architectural decisions are under [`docs/adr/`](docs/adr/).
+
+In conditions, use booleans directly or negate them with `!` rather than comparing them to `true` or `false`. Check for `null` explicitly when it represents a distinct unknown state.
