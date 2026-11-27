@@ -1,0 +1,30 @@
+name: 7tv-discord-sync-dev
+
+services:
+  bot:
+    build: .
+    environment:
+      DISCORD_TOKEN: ${DEV_DISCORD_TOKEN:?Set DEV_DISCORD_TOKEN to a test bot token}
+      DATABASE_URL: postgres://sync:sync_local@postgres:5432/7tv_sync
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: sync
+      POSTGRES_PASSWORD: sync_local
+      POSTGRES_DB: 7tv_sync
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "sync", "-d", "7tv_sync"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 10s
+
+volumes:
+  postgres-data:
