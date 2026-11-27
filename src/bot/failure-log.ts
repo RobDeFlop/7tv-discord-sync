@@ -2,12 +2,13 @@
 export class FailureLog {
   public constructor(private readonly error: unknown) {}
 
-  public write(operation: string): void {
-    const details = [operation];
-    if (this.error !== null && typeof this.error === "object") {
-      if ("status" in this.error && Number.isSafeInteger(this.error.status)) details.push(`status=${this.error.status}`);
-      if ("code" in this.error && Number.isSafeInteger(this.error.code)) details.push(`code=${this.error.code}`);
-    }
-    console.error(details.join(" "));
+  public format(operation: string): string {
+    if (this.error === null || typeof this.error !== "object") return operation;
+
+    const status = "status" in this.error ? this.error.status : undefined;
+    const code = "code" in this.error ? this.error.code : undefined;
+    const statusDetail = Number.isSafeInteger(status) ? ` status=${status}` : "";
+    const codeDetail = Number.isSafeInteger(code) ? ` code=${code}` : "";
+    return `${operation}${statusDetail}${codeDetail}`;
   }
 }

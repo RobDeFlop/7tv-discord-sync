@@ -1,8 +1,8 @@
-import { FailureLog } from "./failure-log.ts";
 import type { LinkSourceSetCommand, SyncCore } from "../core/index.ts";
 import type { ServerId } from "../domain/index.ts";
 import { RateLimitError, type SevenTvChange, type SevenTvPort, type StorePort } from "../ports/index.ts";
 import type { FeedbackRouter } from "./feedback-router.ts";
+import { logger } from "./logger.ts";
 import type { ServerLock } from "./server-lock.ts";
 
 interface SyncRetry {
@@ -74,7 +74,7 @@ export class GatewayEvents {
   /** Reconcile on every 7TV change event. Returns the unsubscribe function. */
   public listenToSevenTv(sevenTv: SevenTvPort): () => void {
     return sevenTv.subscribe((change) => {
-      this.track(this.sevenTvChanged(change).catch((e) => new FailureLog(e).write("7TV change failed:")));
+      this.track(this.sevenTvChanged(change).catch((error) => logger.error("7TV change failed:", error)));
     });
   }
 
@@ -154,6 +154,6 @@ export class GatewayEvents {
   }
 
   private report(server: ServerId, err: unknown): void {
-    new FailureLog(err).write(`Sync failed for ${server}:`);
+    logger.error(`Sync failed for ${server}:`, err);
   }
 }
