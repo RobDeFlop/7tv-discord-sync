@@ -48,6 +48,33 @@ describe("Manage Expressions permission", () => {
     expect(discord.emojis(S)).toEqual([]);
   });
 
+  test("every Command checks permissions before loading state or writing to Discord", async () => {
+    const { discord, core, store, emotes } = setup();
+    emotes(["a"]);
+    const preview = await core.prepareEmoteAdd(S, "https://7tv.app/emotes/a");
+    if (!("prepared" in preview)) throw new Error("Expected an importable preview");
+    discord.revokeManageExpressions(S);
+    const load = spyOn(store, "load");
+    const operations = [
+      () => core.linkSourceSet(S, userLink("u1")),
+      () => core.apply(S, new UnlinkSourceSetCommand(false)),
+      () => core.apply(S, new SetTrendingCommand(true)),
+      () => core.apply(S, new ConfigureLogChannelCommand("log")),
+      () => core.addEmote(S, preview.prepared),
+      () => core.removeEmote(S, "AA"),
+    ];
+    try {
+      for (const run of operations) {
+        expect((await run()).feedback[0]?.text).toContain("missing the Manage Expressions permission");
+      }
+      expect(load).not.toHaveBeenCalled();
+      expect(await store.listServers()).toEqual([]);
+      expect(discord.emojis(S)).toEqual([]);
+    } finally {
+      load.mockRestore();
+    }
+  });
+
   test("/status shows whether the permission is missing", async () => {
     const { discord, core } = setup();
     expect((await core.status(S)).manageExpressions).toBe(true);

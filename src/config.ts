@@ -1,3 +1,9 @@
+export class MissingConfigError extends Error {
+  public constructor(public readonly variables: readonly ("DISCORD_TOKEN" | "DATABASE_URL")[]) {
+    super(`Missing required environment variables: ${variables.join(", ")}`);
+  }
+}
+
 /** The single place configuration is read from the environment. */
 export class Config {
   private static readonly REQUIRED = ["DISCORD_TOKEN", "DATABASE_URL"] as const;
@@ -11,7 +17,7 @@ export class Config {
     const { DISCORD_TOKEN, DATABASE_URL } = env;
     if (!DISCORD_TOKEN || !DATABASE_URL) {
       const missing = Config.REQUIRED.filter((key) => !env[key]);
-      throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
+      throw new MissingConfigError(missing);
     }
     return new Config(DISCORD_TOKEN, DATABASE_URL);
   }

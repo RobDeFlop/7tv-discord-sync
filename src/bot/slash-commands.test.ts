@@ -432,6 +432,46 @@ describe("commands translate to core calls", () => {
     }
   });
 
+  test("long private sync reports preserve rate-limit notices and mark omitted details", async () => {
+    const { core, log } = setup();
+    const request = new FakeRequest("sync");
+    const observer = new FeedbackRouter(core, log).privateReply(request);
+    const details = Array.from({ length: 30 }, (_, i) => ({
+      level: "warning" as const, text: `Issue ${i}: ${"x".repeat(600)}`,
+    }));
+    await observer(S, { kind: "paused", retryAt: Date.now() + 2000, result: {
+      changes: [], feedback: [{ level: "warning", text: "Sync paused by Discord's rate limit." }, ...details],
+    } });
+    await observer(S, { kind: "finished", result: {
+      changes: [], feedback: [{ level: "info", text: "Sync resumed after Discord's rate limit." }, ...details],
+    } });
+    for (const [index, notice] of ["Sync paused", "Sync resumed"].entries()) {
+      expect(request.edits[index]).toContain(notice);
+      expect(request.edits[index]).toContain("Some details were omitted");
+      expect(request.edits[index]?.length).toBeLessThanOrEqual(2000);
+    }
+    expect(log.sent).toEqual([]);
+  });
+
+  test("setting fallback includes the setting result and never echoes an invalid link", async () => {
+    const { events, log, registry, run } = setup();
+    await run("config log-channel", { channel: "log" });
+
+    const expired = Date.now() - 15 * 60_000;
+    await registry.handle(new FakeRequest("set link", { link: "postgres://user:private-token@host/db" }, S, true, expired));
+    await events.idle();
+    const invalid = JSON.stringify(log.sent);
+    expect(invalid).toContain("not a valid 7TV user link");
+    expect(invalid).not.toContain("private-token");
+    expect(invalid).not.toContain("postgres://");
+
+    await registry.handle(new FakeRequest("set link", { link: "https://7tv.app/users/u1" }, S, true, expired));
+    await events.idle();
+    const valid = JSON.stringify(log.sent);
+    expect(valid).toContain("Linked streamer");
+    expect(valid).toContain("Added Pog.");
+  });
+
   test("without a log channel a /sync problem is recorded for /status but not posted", async () => {
     const { sevenTv, run, events, log } = setup();
     await run("set link", { link: "https://7tv.app/users/u1" });

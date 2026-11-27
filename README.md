@@ -115,7 +115,7 @@ An emote higher in the list pushes out one lower in the list. Animated emotes ar
 
 ### Sync results
 
-`/sync`, `/set link`, and `/trending` acknowledge immediately in a private reply. The bot edits that same reply with the result, including any pause and resumption due to Discord rate limits. If Discord's roughly 15-minute edit window passes or the edit fails, the bot posts the result to the configured log channel. `/status` shows the latest sync summary since startup and any saved problems, even without a log channel.
+`/sync`, `/set link`, and `/trending` acknowledge immediately in a private reply. The bot edits that same reply with the result, including any pause and resumption due to Discord rate limits. If Discord's roughly 15-minute edit window passes or the edit fails, the bot posts the result to the configured log channel. `/status` shows the latest sync summary since startup and any saved problems, even without a log channel. Automatic syncs that have nothing to report do not replace that summary.
 
 The bot also syncs on its own when it joins a Server, when emojis change, when the boost level changes, when the Source Set changes, and once for each Server at startup. Automatic sync feedback goes to the configured log channel. Removing the bot from a Server deletes that Server's stored data; the emojis stay.
 

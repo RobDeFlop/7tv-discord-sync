@@ -1,5 +1,6 @@
 import {
   DisplacementError,
+  DomainError,
   EmoteAddNameConflictError,
   EmoteAddSlotChangedError,
   EmoteNamer,
@@ -36,7 +37,7 @@ type SlotOutcome =
   | { kind: "placed"; name: string }
   | { kind: "pending"; quota: Quota; fresh: boolean }
   | { kind: "skipped" }
-  | { kind: "failed"; error: unknown };
+  | { kind: "failed"; error: DomainError };
 
 /** Owns how a missing emote acquires a Slot, including naming, images and failed Displacement recovery. */
 export class SlotAcquisition {
@@ -53,12 +54,12 @@ export class SlotAcquisition {
     return { ...placement, displace: victim?.discordEmojiId ?? null, notice };
   }
 
-  /** Run in the active Server session. A rate limit interrupts the run unchanged. */
+  /** Run in the active Server session. A failure outside the domain (including a rate limit) interrupts the run. */
   public async acquire(synced: SyncedServer, report: SyncReport, request: SlotRequest): Promise<SlotOutcome> {
     try {
       return await this.acquireSlot(synced, report, request);
     } catch (error) {
-      if (error instanceof RateLimitError) throw error;
+      if (!(error instanceof DomainError)) throw error;
       return { kind: "failed", error };
     }
   }
@@ -120,7 +121,10 @@ export class SlotAcquisition {
     const emoji = synced.emojiOf(managed);
     const { name, suffixed } = SlotAcquisition.placementName(synced, wanted, emoji.id);
     if (exact && suffixed) throw EmoteAddNameConflictError.taken(wanted);
-    if (name === emoji.name) return name;
+    if (name === emoji.name) {
+      if (!suffixed) synced.state.problemLedger.renamedWithoutSuffix(managed.sevenTvEmoteId);
+      return name;
+    }
     await synced.renameEmoji(emoji, name);
     report.change({ type: "renamed", from: emoji.name, to: name });
     if (suffixed) {

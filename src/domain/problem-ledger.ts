@@ -6,6 +6,7 @@ export class ProblemLedger {
   private entries: Problem[];
   private readonly observed = new Set<Problem>();
   private readonly sourcePending = new Map<SevenTvEmoteId, Problem>();
+  private sourceReviewed = false;
 
   public constructor(previous: readonly Problem[]) {
     this.entries = previous.map((problem) => ({ ...problem }));
@@ -56,22 +57,30 @@ export class ProblemLedger {
     this.forget((entry) => entry.sevenTvEmoteId === emoteId && entry.kind === "renamed-with-suffix");
   }
 
-  /** Only the Source Set can declare its pending review complete; interrupted scans keep old entries. */
+  /** Commit the pending observations only after the Source Set can report them to the admin. */
   public closeSourceSet(): void {
-    this.forget((entry) => entry.kind === "pending");
-    this.entries.push(...this.sourcePending.values());
+    this.forget((entry) => entry.kind === "pending" && entry.sevenTvEmoteId !== undefined &&
+      this.sourcePending.has(entry.sevenTvEmoteId));
+    for (const problem of this.sourcePending.values()) this.observe(problem);
     this.sourcePending.clear();
+    this.sourceReviewed = true;
   }
 
-  /** Only a completed reconcile can prune unobserved image failures. Suffix notices follow ownership. */
+  public sourceUnlinked(): void {
+    this.forget((entry) => entry.kind === "pending");
+  }
+
+  /** Prune only after both tiers had a chance to recover displaced emotes. */
   public closeReconcile(managed: readonly ManagedEmote[]): void {
     const live = new Set(managed.map((emote) => emote.sevenTvEmoteId));
     this.entries = this.entries.filter((entry) => {
       if (ProblemLedger.isImageFailure(entry)) return this.observed.has(entry);
+      if (entry.kind === "pending" && this.sourceReviewed) return this.observed.has(entry);
       if (entry.kind === "renamed-with-suffix") return entry.sevenTvEmoteId !== undefined && live.has(entry.sevenTvEmoteId);
       return true;
     });
     this.observed.clear();
+    this.sourceReviewed = false;
   }
 
   private forget(predicate: (entry: Problem) => boolean): void {

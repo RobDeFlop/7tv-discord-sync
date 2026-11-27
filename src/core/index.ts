@@ -3,6 +3,7 @@ import {
   type EmojiImage,
   type FeedbackMessage,
   type SevenTvEmote,
+  type SevenTvUserId,
   type ServerId,
   type ServerStatus,
   type SyncResult,
@@ -49,6 +50,7 @@ export class SyncCore {
   private readonly allocator: SlotAcquisition;
   private readonly scheduler: SyncScheduler;
   private readonly commandTasks = new Set<Promise<unknown>>();
+  private readonly removals = new Map<ServerId, Promise<void>>();
   private stopping = false;
 
   public constructor(
@@ -143,14 +145,20 @@ export class SyncCore {
     return this.apply(server, new RemoveEmoteCommand(name, this.sevenTv));
   }
 
-  /** Apply and persist a Command; settings join a scheduled sync only after their save succeeds. */
+  /**
+   * Persist a Command and return its feedback. A setting requests a reconcile after saving.
+   * With an observer, return after applying the setting and report sync pauses/results to that observer;
+   * otherwise await the reconcile too. Unexpected Command errors reject; unexpected reconcile
+   * failures are published as feedback to observers and thrown for callers without one.
+   */
   public async apply(server: ServerId, command: Command, observer?: SyncObserver): Promise<SyncResult> {
-    if (this.stopping) {
-      const result = SyncReport.single("warning", "Command cancelled because the bot is stopping.");
+    if (this.stopping || this.removals.has(server)) {
+      const result = SyncCore.cancelledCommand();
       if (observer) await observer(server, { kind: "cancelled", result });
       return result;
     }
     const committed = this.lock.run(server, async () => {
+      if (this.removals.has(server)) return { result: SyncCore.cancelledCommand(), cancelled: true };
       const report = new SyncReport();
       let applied = false;
       try {
@@ -160,16 +168,18 @@ export class SyncCore {
         });
       } catch (error) {
         if (!(error instanceof RateLimitError)) throw error;
+        if (this.removals.has(server)) return { result: SyncCore.cancelledCommand(), cancelled: true };
         const pause = this.scheduler.recover(server, error, report.toResult());
         report.say("warning", `Discord stopped this command before it finished. ${pause} Retry the command after sync resumes.`);
       }
+      if (this.removals.has(server)) return { result: SyncCore.cancelledCommand(), cancelled: true };
       const result = report.toResult();
       const completion = applied && command.requestsSync
         ? this.scheduler.request(server, observer && ((target, update) => observer(target, update, result.feedback)))
         : undefined;
       return { result, completion };
-    }).then(async ({ result, completion }) => {
-      if (!completion && observer) await observer(server, { kind: "finished", result });
+    }).then(async ({ result, completion, cancelled }) => {
+      if (!completion && observer) await observer(server, { kind: cancelled ? "cancelled" : "finished", result });
       return { result, completion };
     });
     this.commandTasks.add(committed);
@@ -183,9 +193,16 @@ export class SyncCore {
     return { changes: done.result.changes, feedback: [...result.feedback, ...done.result.feedback] };
   }
 
-  /** Queue a sync. Observers receive retry notices and the final result. */
-  public async reconcile(server: ServerId, observer?: SyncObserver): Promise<SyncResult> {
-    const { result, error } = await this.scheduler.request(server, observer);
+  /**
+   * Queue a reconcile and resolve when it finishes or is cancelled. An observer receives intermediate
+   * retry notices and terminal feedback; unexpected failures reject only without an observer.
+   */
+  public async reconcile(
+    server: ServerId,
+    observer?: SyncObserver,
+    trigger: "requested" | "automatic" = "requested",
+  ): Promise<SyncResult> {
+    const { result, error } = await this.scheduler.request(server, observer, trigger);
     if (error && !observer) throw error.cause;
     return result;
   }
@@ -194,11 +211,17 @@ export class SyncCore {
     return this.store.listServers();
   }
 
-  public async serversFollowing(change: SevenTvChange): Promise<ServerId[]> {
+  public async serversFollowing(changes: readonly SevenTvChange[]): Promise<ServerId[]> {
+    const users = new Set<SevenTvUserId>();
+    let allLinked = false;
+    for (const change of changes) {
+      if (change.type === "active-set-switched") users.add(change.userId);
+      else allLinked = true;
+    }
     const targets: ServerId[] = [];
     for (const server of await this.storedServers()) {
       const linked = (await this.store.load(server)).linkedUserId;
-      if (linked !== null && (change.type !== "active-set-switched" || linked === change.userId)) targets.push(server);
+      if (linked !== null && (allLinked || users.has(linked))) targets.push(server);
     }
     return targets;
   }
@@ -208,8 +231,17 @@ export class SyncCore {
   }
 
   public removeServer(server: ServerId): Promise<void> {
+    const running = this.removals.get(server);
+    if (running) return running;
     this.scheduler.cancel(server);
-    return this.lock.run(server, () => this.store.remove(server));
+    const removal = this.lock.run(server, () => this.store.remove(server))
+      .finally(() => this.removals.delete(server));
+    this.removals.set(server, removal);
+    return removal;
+  }
+
+  private static cancelledCommand(): SyncResult {
+    return SyncReport.single("warning", "Command cancelled because the bot left this Server or is stopping.");
   }
 
   public async syncIdle(): Promise<void> {

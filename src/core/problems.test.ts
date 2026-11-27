@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { SetTrendingCommand, SyncCore } from "./index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
 import { addRequestedEmote } from "../testing/requested-emotes.ts";
@@ -58,6 +58,42 @@ describe("problems only show what is current", () => {
     sevenTv.setEmotes("setA", "Main", []);
     await core.reconcile(S);
     expect(await problems()).toEqual([]);
+  });
+
+  test("a suffix problem goes away when the Source Set explicitly adopts the current name", async () => {
+    const { discord, sevenTv, core, emotes, names, problems } = setup();
+    emotes(["a"]);
+    discord.seedEmoji(S, { name: "AA", animated: false });
+    sevenTv.setEmotes("setA", "Main", ["a"]);
+    await core.linkSourceSet(S, userLink);
+    expect(await problems()).toMatchObject([{ kind: "renamed-with-suffix" }]);
+    sevenTv.renameEmote("a", "AA_2");
+    const result = await core.reconcile(S);
+    expect(result.changes).toEqual([]);
+    expect(names()).toEqual(["AA", "AA_2"]);
+    expect(await problems()).toEqual([]);
+  });
+
+  test("failed Trending Fill does not erase a pending victim from a previous Displacement", async () => {
+    const { discord, sevenTv, core, emotes } = setup();
+    emotes(["a", "b"]);
+    for (let i = 0; i < 49; i++) discord.seedEmoji(S, { name: `reserved_${i}`, animated: false });
+    sevenTv.setTrending("week", ["a"]);
+    await core.apply(S, new SetTrendingCommand(true));
+    discord.failCreatesAfter(S, 0, new Error("cannot upload"));
+    await addRequestedEmote(core, S, "b");
+    expect((await core.status(S)).problems).toMatchObject([{ kind: "pending", sevenTvEmoteId: "a" }]);
+
+    const trending = spyOn(sevenTv, "getTrending").mockRejectedValueOnce(new Error("7TV outage"));
+    try {
+      await expect(core.reconcile(S)).rejects.toThrow("7TV outage");
+      expect((await core.status(S)).problems).toMatchObject([{ kind: "pending", sevenTvEmoteId: "a" }]);
+    } finally {
+      trending.mockRestore();
+    }
+    discord.allowCreates(S);
+    await core.reconcile(S);
+    expect((await core.status(S)).problems).toEqual([]);
   });
 
   test("a problem about a removed Trending Fill emote goes away", async () => {

@@ -209,18 +209,27 @@ describe("downloadImage", () => {
     expect(await adapter.downloadImage(fx.EMOTE_ID)).toEqual({ ok: false, reason: "unavailable" });
   });
 
-  test("an invalid image host is logged as unavailable and not fetched", async () => {
+  test("an invalid image host is a logged typed failure and is not fetched", async () => {
     const { adapter, calls } = setup({
       [`${API}/emotes/${fx.EMOTE_ID}`]: { ...fx.animatedEmote, host: { ...fx.animatedEmote.host, url: "//other.invalid/emote/x" } },
     });
     const logged = spyOn(console, "warn").mockImplementation(() => {});
     try {
-      expect(await adapter.downloadImage(fx.EMOTE_ID)).toEqual({ ok: false, reason: "unavailable" });
+      await expect(adapter.downloadImage(fx.EMOTE_ID)).rejects.toBeInstanceOf(SevenTvRequestError);
       expect(calls).toHaveLength(1);
-      expect(logged.mock.calls).toEqual([[expect.stringMatching(/seventv_image_unavailable operation=lookup_emote emote=\w+ error=SevenTvRequestError$/)]]);
+      expect(logged.mock.calls).toEqual([[expect.stringMatching(/seventv_image_lookup_failed operation=lookup_emote emote=\w+ error=SevenTvRequestError$/)]]);
     } finally {
       logged.mockRestore();
     }
+  });
+
+  test("a transient metadata failure stays retryable rather than masquerading as an unusable image", async () => {
+    const path = `${API}/emotes/${fx.EMOTE_ID}`;
+    const routes: Record<string, unknown> = { [path]: 503, [`https://cdn.7tv.app/emote/${fx.EMOTE_ID}/2x.webp`]: bytes };
+    const { adapter } = setup(routes);
+    await expect(adapter.downloadImage(fx.EMOTE_ID)).rejects.toMatchObject({ status: 503 });
+    routes[path] = fx.animatedEmote;
+    await expect(adapter.downloadImage(fx.EMOTE_ID)).resolves.toMatchObject({ ok: true });
   });
 
   test("passes through the pipeline's too-large verdict and preview image", async () => {

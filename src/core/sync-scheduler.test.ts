@@ -2,6 +2,41 @@ import { expect, jest, test } from "bun:test";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
 import { RateLimitError } from "../ports/index.ts";
 import { SyncCore, type SyncUpdate } from "./index.ts";
+import { MAX_CONCURRENT_RECONCILES } from "./sync-scheduler.ts";
+
+test("coalesced result delivery is bounded separately from reconciliation", async () => {
+  const discord = new FakeDiscord();
+  discord.addServer("a");
+  discord.addServer("b");
+  const core = new SyncCore(new FakeSevenTv(), discord, new FakeStore());
+  const release = Promise.withResolvers<void>();
+  const full = Promise.withResolvers<void>();
+  let active = 0;
+  let delivered = 0;
+  let peak = 0;
+  const count = MAX_CONCURRENT_RECONCILES * 3;
+  const requests = Array.from({ length: count }, () => core.reconcile("a", async () => {
+    peak = Math.max(peak, ++active);
+    if (active === MAX_CONCURRENT_RECONCILES) full.resolve();
+    await release.promise;
+    active--;
+    delivered++;
+  }));
+  try {
+    await full.promise;
+    await Bun.sleep(0);
+    expect(active).toBe(MAX_CONCURRENT_RECONCILES);
+    discord.seedEmoji("b", { name: "manual", animated: false });
+    await core.reconcile("b");
+    expect((await core.status("b")).quotas.static.byTier.reserved).toBe(1);
+  } finally {
+    release.resolve();
+    await Promise.all(requests);
+    await core.stop();
+  }
+  expect(delivered).toBe(count);
+  expect(peak).toBe(MAX_CONCURRENT_RECONCILES);
+});
 
 test("a rate-limited Requested Emote preserves its displacement and queues recovery", async () => {
   jest.useFakeTimers();

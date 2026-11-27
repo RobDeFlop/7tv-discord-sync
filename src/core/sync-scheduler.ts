@@ -20,6 +20,7 @@ class SyncBatch {
   public readonly observers = new Map<SyncObserver, Promise<void>>();
   public readonly done: Promise<Completion>;
   public scheduled = false;
+  public retainEmpty = false;
   public delay = 500;
   public timer: ReturnType<typeof setTimeout> | undefined;
   public pause: Extract<SyncUpdate, { kind: "paused" }> | undefined;
@@ -29,6 +30,28 @@ class SyncBatch {
     const { promise, resolve } = Promise.withResolvers<Completion>();
     this.done = promise;
     this.finish = resolve;
+  }
+}
+
+type SyncTrigger = "requested" | "automatic";
+
+/** FIFO permits used independently for reconciliation and Discord result delivery. */
+class WorkLimit {
+  private readonly waiting: Array<() => void> = [];
+  private active = 0;
+
+  public constructor(private readonly capacity: number) {}
+
+  public async run<T>(task: () => Promise<T>): Promise<T> {
+    if (this.active >= this.capacity) await new Promise<void>((resolve) => this.waiting.push(resolve));
+    else this.active++;
+    try {
+      return await task();
+    } finally {
+      const next = this.waiting.shift();
+      if (next) next();
+      else this.active--;
+    }
   }
 }
 
@@ -44,8 +67,8 @@ export class SyncScheduler {
   private readonly lanes = new Map<ServerId, ServerLane>();
   private readonly latest = new Map<ServerId, NonNullable<ServerStatus["lastSync"]>>();
   private readonly working = new Set<Promise<void>>();
-  private readonly permits: Array<() => void> = [];
-  private activeCount = 0;
+  private readonly attempts = new WorkLimit(MAX_CONCURRENT_RECONCILES);
+  private readonly deliveries = new WorkLimit(MAX_CONCURRENT_RECONCILES);
   private stopped = false;
 
   public constructor(
@@ -55,15 +78,16 @@ export class SyncScheduler {
   ) {}
 
   /** Requests before a run starts share that run; requests during a run get one follow-up. */
-  public request(server: ServerId, observer?: SyncObserver): Promise<Completion> {
+  public request(server: ServerId, observer?: SyncObserver, trigger: SyncTrigger = "requested"): Promise<Completion> {
     if (this.stopped) {
       const update = SyncScheduler.cancelled();
-      if (observer) this.track(Promise.resolve().then(() => observer(server, update))
+      if (observer) this.track(this.deliveries.run(() => observer(server, update))
         .catch((error: unknown) => this.onFailure(server, "notify", error)));
       return Promise.resolve({ result: update.result });
     }
     const lane = this.lane(server);
     const batch = lane.retry ?? (lane.pending ??= new SyncBatch());
+    batch.retainEmpty ||= trigger === "requested";
     this.observe(server, batch, observer);
     this.start(server, lane);
     return batch.done;
@@ -81,7 +105,7 @@ export class SyncScheduler {
       clearTimeout(batch.timer);
       this.pause(server, lane, batch, error);
     }
-    return batch.pause?.result.feedback.at(-1)?.text ?? "Sync is already queued to resume.";
+    return batch.pause?.result.feedback[0]?.text ?? "Sync is already queued to resume.";
   }
 
   public lastUpdate(server: ServerId): ServerStatus["lastSync"] {
@@ -134,21 +158,8 @@ export class SyncScheduler {
     const batch = lane.retry ?? lane.pending;
     if (!batch || lane.active || batch.scheduled || batch.timer) return;
     batch.scheduled = true;
-    // The permit surrounds the attempt, not time spent waiting on another Command or on backoff.
-    this.track(this.lock.run(server, () => this.withPermit(async () => {
-      if (this.lanes.get(server) !== lane) return;
-      // A Command may have requested a priority retry before this attempt acquired the lock.
-      if (batch.timer || (lane.retry && lane.retry !== batch)) {
-        batch.scheduled = false;
-        return;
-      }
-      if (lane.retry === batch) lane.retry = undefined;
-      if (lane.pending === batch) lane.pending = undefined;
-      lane.active = batch;
+    this.track(this.runWhenReady(server, lane, batch).then(() => {
       batch.scheduled = false;
-      await this.attempt(server, lane, batch);
-      lane.active = undefined;
-    })).then(() => {
       if (this.lanes.get(server) !== lane) return;
       if (lane.pending || lane.retry) this.start(server, lane);
       else if (!lane.active) this.lanes.delete(server);
@@ -156,6 +167,31 @@ export class SyncScheduler {
       this.onFailure(server, "reconcile", error);
       this.cancel(server);
     }));
+  }
+
+  private async runWhenReady(server: ServerId, lane: ServerLane, batch: SyncBatch): Promise<void> {
+    for (;;) {
+      await this.lock.idle(server);
+      const released = await this.attempts.run(async () => {
+        if (this.lanes.get(server) !== lane || batch.timer || (lane.retry && lane.retry !== batch)) return true;
+        // A Command can start while this batch waits for capacity. Release the permit rather than
+        // holding it while waiting; other Servers and Commands make progress independently.
+        const running = this.lock.tryRun(server, async () => {
+          if (lane.retry === batch) lane.retry = undefined;
+          if (lane.pending === batch) lane.pending = undefined;
+          lane.active = batch;
+          try {
+            await this.attempt(server, lane, batch);
+          } finally {
+            lane.active = undefined;
+          }
+        });
+        if (!running) return false;
+        await running;
+        return true;
+      });
+      if (released) return;
+    }
   }
 
   private async attempt(server: ServerId, lane: ServerLane, batch: SyncBatch): Promise<void> {
@@ -176,12 +212,12 @@ export class SyncScheduler {
     }
     if (this.lanes.get(server) !== lane) return;
     batch.report.merge(report.toResult());
-    if (batch.pause && !batch.report.toResult().feedback.some((message) => message.level === "error")) {
-      batch.report.say("info", "Sync resumed after Discord's rate limit.");
-    }
     const result = batch.report.toResult();
+    if (batch.pause) result.feedback.unshift({ level: "info", text: "Sync resumed after Discord's rate limit." });
     const update: SyncUpdate = { kind: "finished", result };
-    this.remember(server, update);
+    if (batch.retainEmpty || result.changes.length || result.feedback.length || !this.latest.has(server)) {
+      this.remember(server, update);
+    }
     this.publish(server, batch, update);
     batch.finish({ result, error: failure });
   }
@@ -190,7 +226,7 @@ export class SyncScheduler {
     batch.delay = Math.max(error.retryAfterMs, Math.min(batch.delay * 2, SyncScheduler.MAX_BACKOFF_MS));
     const retryAt = Date.now() + batch.delay;
     const result = batch.report.toResult();
-    result.feedback.push({
+    result.feedback.unshift({
       level: "warning",
       text: `Sync paused by Discord's rate limit; it will resume in ${Math.ceil(batch.delay / 1000)}s.`,
     });
@@ -209,10 +245,16 @@ export class SyncScheduler {
     this.latest.set(server, {
       changeCount: update.result.changes.length,
       retryAt: update.kind === "paused" ? update.retryAt : undefined,
-      feedback: update.result.feedback.slice(-6).map((message) => ({
+      feedback: SyncScheduler.summaryFeedback(update.result).map((message) => ({
         ...message, text: message.text.slice(0, 240).toWellFormed(),
       })),
     });
+  }
+
+  private static summaryFeedback(result: SyncResult): FeedbackMessage[] {
+    const errors = result.feedback.filter((message) => message.level === "error").slice(-2);
+    const other = result.feedback.filter((message) => message.level !== "error").slice(0, 6 - errors.length);
+    return [...errors, ...other];
   }
 
   private publish(server: ServerId, batch: SyncBatch, update: SyncUpdate): void {
@@ -221,7 +263,7 @@ export class SyncScheduler {
 
   private notify(server: ServerId, batch: SyncBatch, observer: SyncObserver, update: SyncUpdate): void {
     const delivery = (batch.observers.get(observer) ?? Promise.resolve())
-      .then(() => observer(server, update))
+      .then(() => this.deliveries.run(() => observer(server, update)))
       .catch((error: unknown) => this.onFailure(server, "notify", error));
     batch.observers.set(observer, delivery);
     this.track(delivery);
@@ -230,19 +272,6 @@ export class SyncScheduler {
   private track(work: Promise<void>): void {
     const tracked = work.finally(() => this.working.delete(tracked));
     this.working.add(tracked);
-  }
-
-  private async withPermit(run: () => Promise<void>): Promise<void> {
-    if (this.activeCount >= MAX_CONCURRENT_RECONCILES) {
-      await new Promise<void>((resolve) => this.permits.push(resolve));
-    } else this.activeCount++;
-    try {
-      await run();
-    } finally {
-      const next = this.permits.shift();
-      if (next) next();
-      else this.activeCount--;
-    }
   }
 
   private static cancelled(): SyncUpdate {

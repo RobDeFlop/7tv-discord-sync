@@ -10,19 +10,16 @@ export type LinkKind = "emote" | "user";
 
 /** A link cannot be resolved. Thrown by ports, shown to the admin by the core. */
 export class InvalidLinkError extends DomainError {
-  public constructor(
-    public readonly link: string,
-    private readonly expected?: LinkKind,
-  ) {
-    super(`Not a valid 7TV link: ${link}`);
+  public constructor(private readonly expected: LinkKind) {
+    super(`Not a valid 7TV ${expected} link`);
   }
 
   public toFeedback(): FeedbackMessage {
-    if (!this.expected) return { level: "error", text: `"${this.link}" is not a valid 7TV link.` };
     const example = this.expected === "emote" ? "emotes" : "users";
     return {
       level: "error",
-      text: `"${this.link}" is not a valid 7TV ${this.expected} link. Use a link like https://7tv.app/${example}/<id>.`,
+      // A rejected link may contain credentials and can end up in log-channel fallback.
+      text: `That is not a valid 7TV ${this.expected} link. Use a link like https://7tv.app/${example}/<id>.`,
     };
   }
 }

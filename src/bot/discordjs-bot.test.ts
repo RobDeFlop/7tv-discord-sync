@@ -1,13 +1,16 @@
 import { expect, mock, spyOn, test } from "bun:test";
 import {
+  ApplicationCommandType,
+  ChannelType,
+  ChatInputCommandInteraction,
   Client,
   DiscordAPIError,
+  InteractionType,
+  Locale,
   MessageFlags,
   PermissionFlagsBits,
   PermissionsBitField,
   type APIEmbed,
-  type ChatInputCommandInteraction,
-  type Interaction,
   type InteractionEditReplyOptions,
 } from "discord.js";
 import { SyncCore } from "../core/index.ts";
@@ -18,8 +21,24 @@ import { FeedbackRouter } from "./feedback-router.ts";
 import { GatewayEvents } from "./gateway-events.ts";
 import { SlashCommandRegistry } from "./slash-command-registry.ts";
 
+class GatewayCommandInteraction extends ChatInputCommandInteraction {
+  public constructor(client: Client<true>) {
+    super(client, {
+      id: "100", application_id: "101", guild_id: "123", type: InteractionType.ApplicationCommand,
+      channel_id: "104", channel: { id: "104", type: ChannelType.GuildText },
+      token: "fixture", version: 1, locale: Locale.EnglishUS, app_permissions: "0",
+      entitlements: [], authorizing_integration_owners: {}, attachment_size_limit: 1024,
+      member: {
+        user: { id: "102", username: "admin", discriminator: "0", avatar: null, global_name: null },
+        permissions: "8", roles: [], flags: 0, deaf: false, mute: false, joined_at: "2020-01-01T00:00:00Z",
+      },
+      data: { id: "103", name: "sync", type: ApplicationCommandType.ChatInput },
+    });
+  }
+}
+
 function gatewayFixture() {
-  const client = new Client({ intents: [] });
+  const client = new Client<true>({ intents: [] });
   const store = new FakeStore();
   const core = new SyncCore(new FakeSevenTv(), new FakeDiscord(), store);
   const log = DiscordBot.logChannel(client);
@@ -39,7 +58,7 @@ test("interaction failures log the SDK error class without logging the interacti
   const logged = spyOn(console, "error").mockImplementation(() => {});
   try {
     await bot.start("unused");
-    client.emit("interactionCreate", { guildId: "123", isChatInputCommand: () => true } as unknown as Interaction);
+    client.emit("interactionCreate", new GatewayCommandInteraction(client));
     await Bun.sleep(0);
     expect(logged.mock.calls).toEqual([[expect.stringMatching(
       / ERROR interaction_failed operation=handle_interaction server=123 error=DiscordAPIError status=404 code=10062$/,
@@ -57,7 +76,7 @@ test("startup failure identifies the failed operation", async () => {
   const logged = spyOn(console, "error").mockImplementation(() => {});
   try {
     await bot.start("unused");
-    client.emit("clientReady", client as Client<true>);
+    client.emit("clientReady", client);
     await Bun.sleep(0);
     expect(logged.mock.calls).toEqual([[expect.stringMatching(/ ERROR startup_failed operation=catch_up_servers error=Error$/)]]);
   } finally {

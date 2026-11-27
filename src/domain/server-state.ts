@@ -128,7 +128,7 @@ export class ServerState {
     this.managed = this.managed.filter((m) => m.tier !== "source");
     if (keepAsReserved) this.reserved.push(...released.map((m) => new ReservedSlot(m.discordEmojiId, m.quota)));
     this.linkedUser = null;
-    this.problemLedger.closeSourceSet();
+    this.problemLedger.sourceUnlinked();
     return released;
   }
 

@@ -67,17 +67,17 @@ export class SevenTvAdapter extends SevenTvPort {
 
   public async resolveEmoteLink(link: string): Promise<SevenTvEmote> {
     const parsed = SevenTvLink.parse(link);
-    if (!parsed || !parsed.canBe("emote")) throw new InvalidLinkError(link, "emote");
+    if (!parsed || !parsed.canBe("emote")) throw new InvalidLinkError("emote");
     const emote = await this.getJson(`${API}/emotes/${parsed.id}`, (value) => SevenTvMapper.isEmote(value));
-    if (!emote) throw new InvalidLinkError(link, "emote");
+    if (!emote) throw new InvalidLinkError("emote");
     return SevenTvMapper.emote(emote);
   }
 
   public async resolveUserLink(link: string): Promise<SevenTvUser> {
     const parsed = SevenTvLink.parse(link);
-    if (!parsed || !parsed.canBe("user")) throw new InvalidLinkError(link, "user");
+    if (!parsed || !parsed.canBe("user")) throw new InvalidLinkError("user");
     const user = await this.getUser(parsed.id);
-    if (!user) throw new InvalidLinkError(link, "user");
+    if (!user) throw new InvalidLinkError("user");
     return user;
   }
 
@@ -158,18 +158,21 @@ export class SevenTvAdapter extends SevenTvPort {
   }
 
   public async downloadImage(id: SevenTvEmoteId): Promise<ImageResult> {
-    let operation = "lookup_emote";
+    const emote = await this.getJson(`${API}/emotes/${id}`, (value) => SevenTvMapper.isEmote(value)).catch((error: unknown) => {
+      // Don't cache a metadata outage as a permanent skip in Trending Fill.
+      Logger.write(LogLevel.warn, `seventv_image_lookup_failed operation=lookup_emote emote=${Logger.field(id)} ${Logger.failure(error)}`);
+      throw error;
+    });
+    if (!emote) return SevenTvAdapter.imageUnavailable(id, "lookup_emote", "reason=not_found");
+    const url = SevenTvMapper.sourceUrl(emote);
+    if (!url) return SevenTvAdapter.imageUnavailable(id, "select_source", "reason=no_supported_file");
+    let operation = "download_cdn";
     try {
-      const emote = await this.getJson(`${API}/emotes/${id}`, (value) => SevenTvMapper.isEmote(value));
-      if (!emote) return SevenTvAdapter.imageUnavailable(id, operation, "reason=not_found");
-      const url = SevenTvMapper.sourceUrl(emote);
-      if (!url) return SevenTvAdapter.imageUnavailable(id, "select_source", "reason=no_supported_file");
-      operation = "download_cdn";
       const res = await this.http(url, { redirect: "error" });
       if (!res.ok) return SevenTvAdapter.imageUnavailable(id, operation, `status=${res.status}`);
       const bytes = new Uint8Array(await res.arrayBuffer());
       operation = "prepare_image";
-      return await this.imagePipeline.prepare(bytes, emote.animated === true);
+      return await this.imagePipeline.prepare(bytes, emote.animated ?? false);
     } catch (error) {
       return SevenTvAdapter.imageUnavailable(id, operation, Logger.failure(error));
     }

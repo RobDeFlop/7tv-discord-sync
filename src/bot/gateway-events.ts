@@ -12,7 +12,8 @@ export abstract class ServerDirectory {
 /** Translates gateway events into core calls; the core owns all sync scheduling and retries. */
 export class GatewayEvents {
   private readonly deliveries: SyncObserver;
-  private readonly changes = new Set<Promise<void>>();
+  private readonly pendingChanges = new Map<string, SevenTvChange>();
+  private changeScan: Promise<void> | undefined;
 
   public constructor(
     private readonly core: SyncCore,
@@ -47,19 +48,12 @@ export class GatewayEvents {
 
   /** Filter against current membership after reading the targets, in case a Server left while we waited. */
   public async sevenTvChanged(change: SevenTvChange): Promise<void> {
-    const targets = await this.core.serversFollowing(change);
-    const present = new Set(this.servers.serverIds());
-    for (const server of targets) if (present.has(server)) this.queue(server);
+    await this.queueChange(change);
     await this.core.syncIdle();
   }
 
   public listenToSevenTv(sevenTv: SevenTvPort): () => void {
-    return sevenTv.subscribe((change) => {
-      const work = this.sevenTvChanged(change).catch((error: unknown) => {
-        Logger.write(LogLevel.error, `seventv_change_failed operation=find_targets ${Logger.failure(error)}`);
-      }).finally(() => this.changes.delete(work));
-      this.changes.add(work);
-    });
+    return sevenTv.subscribe((change) => { void this.queueChange(change); });
   }
 
   /** Reconcile present Servers and remove state for Servers that left while the bot was offline. */
@@ -74,12 +68,41 @@ export class GatewayEvents {
 
   /** Wait for ready work and 7TV event delivery, without waiting for backoff timers. */
   public async idle(): Promise<void> {
-    while (this.changes.size) await Promise.all([...this.changes]);
+    while (this.changeScan) await this.changeScan;
     await this.core.syncIdle();
   }
 
+  private queueChange(change: SevenTvChange): Promise<void> {
+    if (change.type === "set-changed") {
+      this.pendingChanges.clear();
+      this.pendingChanges.set("all", change);
+    } else if (!this.pendingChanges.has("all")) {
+      this.pendingChanges.set(`user:${change.userId}`, change);
+    }
+    this.changeScan ??= Promise.resolve().then(() => this.scanChanges());
+    return this.changeScan;
+  }
+
+  private async scanChanges(): Promise<void> {
+    try {
+      while (this.pendingChanges.size) {
+        const changes = [...this.pendingChanges.values()];
+        this.pendingChanges.clear();
+        try {
+          const targets = await this.core.serversFollowing(changes);
+          const present = new Set(this.servers.serverIds());
+          for (const server of targets) if (present.has(server)) this.queue(server);
+        } catch (error) {
+          Logger.write(LogLevel.error, `seventv_change_failed operation=find_targets ${Logger.failure(error)}`);
+        }
+      }
+    } finally {
+      this.changeScan = undefined;
+    }
+  }
+
   private queue(server: ServerId): void {
-    void this.core.reconcile(server, this.deliveries).catch((error: unknown) => {
+    void this.core.reconcile(server, this.deliveries, "automatic").catch((error: unknown) => {
       Logger.write(LogLevel.error, `sync_failed operation=schedule server=${Logger.field(server)} ${Logger.failure(error)}`);
     });
   }

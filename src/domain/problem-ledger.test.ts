@@ -31,6 +31,8 @@ describe("the per-run problem ledger", () => {
     expect(ledger.observeSourcePending("b", pending("b").message)).toBe(false);
     expect(ledger.snapshot()).toEqual([pending("b"), pending("a"), pending("gone")]);
     ledger.closeSourceSet();
+    expect(ledger.snapshot()).toEqual([pending("gone"), pending("a"), pending("c"), pending("b")]);
+    ledger.closeReconcile([]);
     expect(ledger.snapshot()).toEqual([pending("a"), pending("c"), pending("b")]);
   });
 

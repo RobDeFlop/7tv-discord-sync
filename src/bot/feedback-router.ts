@@ -15,6 +15,8 @@ export abstract class LogChannel {
 export class FeedbackRouter {
   private static readonly MAX_EMBED_DESCRIPTION = 4096;
   private static readonly MAX_TOTAL_EMBED_TEXT = 6000;
+  private static readonly MAX_PRIVATE_TEXT = 2000;
+  private static readonly MAX_PRIVATE_LINE = 350;
   // Discord interaction tokens expire after 15 minutes; leave a margin for request latency.
   private static readonly REPLY_WINDOW_MS = 14 * 60_000 + 55_000;
   private readonly delivered = new WeakMap<SyncUpdate, Promise<void>>();
@@ -56,7 +58,9 @@ export class FeedbackRouter {
       if (recipient && Date.now() < deadline) {
         try {
           const feedback = FeedbackRouter.updateFeedback(update, true);
-          await recipient.editOriginal(FeedbackRouter.format([...(setting ?? []), ...feedback]));
+          await recipient.editOriginal(FeedbackRouter.privateText([
+            ...feedback.slice(0, 2), ...(setting ?? []), ...feedback.slice(2),
+          ]));
           return;
         } catch (error) {
           Logger.write(LogLevel.error, `sync_reply_edit_failed operation=edit_original server=${Logger.field(server)} ${Logger.failure(error)}`);
@@ -66,6 +70,10 @@ export class FeedbackRouter {
       }
       release();
       await this.deliverUpdate(server, update, true);
+      // The shared result is posted once, but settings can differ between two invocations.
+      if (update.kind === "finished" && setting?.length) {
+        await this.deliver(server, { changes: [], feedback: [...setting] });
+      }
     };
   }
 
@@ -98,6 +106,26 @@ export class FeedbackRouter {
       return { level: "info", text };
     });
     return [{ level: "info", text: summary }, ...feedback, ...details];
+  }
+
+  private static privateText(feedback: readonly FeedbackMessage[]): string {
+    if (!feedback.length) return "Done.";
+    const lines = feedback.map((message) => FeedbackRouter.line(message));
+    const full = lines.join("\n");
+    if (full.length <= FeedbackRouter.MAX_PRIVATE_TEXT) return full;
+
+    const footer = "\nSome details were omitted. Check /status for recorded problems.";
+    const budget = FeedbackRouter.MAX_PRIVATE_TEXT - footer.length;
+    let text = "";
+    for (const line of lines) {
+      const detail = line.length > FeedbackRouter.MAX_PRIVATE_LINE
+        ? `${line.slice(0, FeedbackRouter.MAX_PRIVATE_LINE - 1).toWellFormed()}…`
+        : line;
+      const next = text ? `${text}\n${detail}` : detail;
+      if (next.length > budget) break;
+      text = next;
+    }
+    return text + footer;
   }
 
   private static embeds(feedback: ReadonlyArray<FeedbackMessage>): APIEmbed[] {

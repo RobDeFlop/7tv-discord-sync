@@ -127,6 +127,34 @@ describe("7TV changes", () => {
     expect(discord.emojis(B)).toEqual([]);
   });
 
+  test("a burst during a target scan coalesces into one follow-up scan", async () => {
+    const { events, link, sevenTv, store } = setup();
+    await link(A);
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const listServers = store.listServers.bind(store);
+    const list = spyOn(store, "listServers").mockImplementationOnce(async () => {
+      started.resolve();
+      await release.promise;
+      return listServers();
+    });
+    const unsubscribe = events.listenToSevenTv(sevenTv);
+    try {
+      sevenTv.emit({ type: "set-changed", setId: "setA" });
+      await started.promise;
+      for (let i = 0; i < 20; i++) sevenTv.emit({ type: "active-set-switched", userId: "u1" });
+      expect(list).toHaveBeenCalledTimes(1);
+      release.resolve();
+      await events.idle();
+      expect(list).toHaveBeenCalledTimes(2);
+    } finally {
+      release.resolve();
+      await events.idle();
+      unsubscribe();
+      list.mockRestore();
+    }
+  });
+
   test("subscribes to the 7TV port and reconciles on its events", async () => {
     const { sevenTv, events, link, names } = setup();
     await link(A);
@@ -152,6 +180,33 @@ describe("catch-up", () => {
     void core;
   });
 
+  test("a setting already in progress cannot enqueue sync after the bot leaves", async () => {
+    const { core, discord, events, sevenTv, store } = setup();
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const resolveLink = sevenTv.resolveUserLink.bind(sevenTv);
+    const resolve = spyOn(sevenTv, "resolveUserLink").mockImplementationOnce(async (link) => {
+      started.resolve();
+      await release.promise;
+      return resolveLink(link);
+    });
+    const setting = core.linkSourceSet(A, "https://7tv.app/users/u1");
+    try {
+      await started.promise;
+      const removed = events.serverLeft(A);
+      release.resolve();
+      expect((await setting).feedback[0]?.text).toContain("cancelled");
+      await removed;
+      await events.idle();
+      expect(await store.listServers()).not.toContain(A);
+      expect(discord.emojis(A)).toEqual([]);
+    } finally {
+      release.resolve();
+      await setting;
+      resolve.mockRestore();
+    }
+  });
+
   test("a failing Server does not stop the others", async () => {
     const { servers, events, link, names, discord } = setup();
     await link(A);
@@ -163,6 +218,14 @@ describe("catch-up", () => {
 });
 
 describe("feedback routing", () => {
+  test("a silent automatic follow-up does not erase the last meaningful summary", async () => {
+    const { core, events, link } = setup();
+    await link(A);
+    expect((await core.status(A)).lastSync?.changeCount).toBe(1);
+    await events.emojiChanged(A);
+    expect((await core.status(A)).lastSync?.changeCount).toBe(1);
+  });
+
   test("automatic sync feedback goes to the log channel when one is set", async () => {
     const { discord, core, log, events } = setup();
     await core.apply(A, new ConfigureLogChannelCommand("chan-1"));
@@ -205,7 +268,7 @@ describe("feedback routing", () => {
 });
 
 test.each(["startup catch-up", "7TV change"] as const)("%s limits active reconciles and tries every Server", async (event) => {
-  const { discord, events, servers, store } = setup();
+  const { core, discord, events, servers, store } = setup();
   servers.ids = Array.from({ length: MAX_CONCURRENT_RECONCILES * 3 }, (_, i) => `target-${i}`);
   for (const server of servers.ids) {
     discord.addServer(server);
@@ -218,7 +281,11 @@ test.each(["startup catch-up", "7TV change"] as const)("%s limits active reconci
   const attempted: ServerId[] = [];
   let active = 0;
   let peak = 0;
+  const waitingServer = servers.ids[MAX_CONCURRENT_RECONCILES];
+  if (!waitingServer) throw new Error("Expected a Server waiting for capacity");
+  let checkingCommand = false;
   const list = spyOn(discord, "listEmojis").mockImplementation(async (server) => {
+    if (checkingCommand && server === waitingServer) return [];
     attempted.push(server);
     peak = Math.max(peak, ++active);
     if (active === MAX_CONCURRENT_RECONCILES) firstWave.resolve();
@@ -238,7 +305,12 @@ test.each(["startup catch-up", "7TV change"] as const)("%s limits active reconci
     await Bun.sleep(0);
     expect(peak).toBe(MAX_CONCURRENT_RECONCILES);
     expect(attempted).toHaveLength(MAX_CONCURRENT_RECONCILES);
+    checkingCommand = true;
+    const command = core.apply(waitingServer, new ConfigureLogChannelCommand("log"));
+    const result = await Promise.race([command, Bun.sleep(150).then(() => null)]);
+    expect(result?.feedback[0]?.text).toBe("Log channel updated.");
   } finally {
+    checkingCommand = false;
     release.resolve();
     await scheduling;
     list.mockRestore();
