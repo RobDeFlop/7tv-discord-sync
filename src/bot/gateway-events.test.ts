@@ -6,6 +6,7 @@ import type { ServerId } from "../domain/index.ts";
 import { FakeDiscord, FakeSevenTv, FakeStore } from "../testing/fakes.ts";
 import { FeedbackRouter } from "./feedback-router.ts";
 import { GatewayEvents } from "./gateway-events.ts";
+import { Logger, LogLevel } from "./logger.ts";
 import { FakeLogChannel, FakeServers } from "../testing/bot-fakes.ts";
 
 const A = "server-a";
@@ -15,7 +16,9 @@ function setup() {
   const discord = new FakeDiscord();
   const sevenTv = new FakeSevenTv();
   const store = new FakeStore();
-  const core = new SyncCore(sevenTv, discord, store);
+  const core = new SyncCore(sevenTv, discord, store, (server, operation, error) => {
+    Logger.write(LogLevel.error, `sync_failed operation=${operation} server=${Logger.field(server)} ${Logger.failure(error)}`);
+  });
   const log = new FakeLogChannel();
   const servers = new FakeServers();
   servers.ids = [A, B];
@@ -51,6 +54,21 @@ describe("server events", () => {
     discord.removeEmojiByHand(A, discord.emojis(A)[0]!.id);
     await events.emojiChanged(A);
     expect(names(A)).toEqual(["Pog"]);
+  });
+
+  test("a failed reconcile logs the Server and operation and keeps the admin feedback distinct", async () => {
+    const { core, discord, events, log } = setup();
+    await core.apply(A, new ConfigureLogChannelCommand("log"));
+    const reconcile = spyOn(discord, "listEmojis").mockRejectedValueOnce(new TypeError("private detail"));
+    const errors = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await events.emojiChanged(A);
+      expect(errors.mock.calls).toEqual([[expect.stringMatching(/ ERROR sync_failed operation=reconcile server=server-a error=TypeError$/)]]);
+      expect(log.sent[0]?.embeds[0]?.description).toBe("Sync failed. Try /sync again in a moment.");
+    } finally {
+      reconcile.mockRestore();
+      errors.mockRestore();
+    }
   });
 
   test("a boost level change reconciles the Server", async () => {

@@ -34,7 +34,7 @@ export abstract class SlashCommand {
       if (reply !== undefined) await request.reply(reply);
     } catch (err) {
       if (err instanceof DomainError) return request.reply(FeedbackRouter.format([err.toFeedback()]));
-      Logger.write(LogLevel.error, `/${this.path} failed in ${server}.`);
+      Logger.write(LogLevel.error, `slash_command_failed operation=run_command command=${Logger.field(this.path)} server=${Logger.field(server)} ${Logger.failure(err)}`);
       await request.reply("Something went wrong. Try again in a moment.");
     }
   }

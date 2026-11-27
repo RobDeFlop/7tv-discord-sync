@@ -22,7 +22,7 @@ export class Application {
     this.store = new PostgresStore(config.databaseUrl);
     const sevenTv = new SevenTvAdapter(new ImagePipeline());
     this.core = new SyncCore(sevenTv, new DiscordJsAdapter(client), this.store, (server, operation, error) => {
-      Logger.write(LogLevel.error, `sync_failed server=${server} operation=${operation} error_kind=${error instanceof Error ? "Error" : typeof error}`);
+      Logger.write(LogLevel.error, `sync_failed operation=${operation} server=${Logger.field(server)} ${Logger.failure(error)}`);
     });
     const logChannel = DiscordBot.logChannel(client);
     const feedback = new FeedbackRouter(this.core, logChannel);
@@ -34,7 +34,14 @@ export class Application {
   public async start(): Promise<void> {
     await this.store.migrate();
     await this.bot.start(this.config.discordToken);
-    for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => void this.stop());
+    for (const signal of ["SIGINT", "SIGTERM"] as const) {
+      process.once(signal, () => {
+        void this.stop().catch((error: unknown) => {
+          Logger.write(LogLevel.error, `shutdown_failed operation=stop_application signal=${signal} ${Logger.failure(error)}`);
+          process.exit(1);
+        });
+      });
+    }
   }
 
   public async stop(): Promise<void> {

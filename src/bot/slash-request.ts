@@ -14,9 +14,15 @@ export abstract class SlashRequest {
   public abstract get userId(): string;
   /** Epoch milliseconds at creation, not at the point work was queued. */
   public abstract get createdAt(): number;
-  /** Value of a string option (also channel and choice options, as ids/values), or null if not given. */
-  public abstract stringOption(name: string): string | null;
-  public abstract booleanOption(name: string): boolean | null;
+
+  /** Untrusted option value; undefined if not provided. */
+  public abstract option(name: string): unknown;
+
+  public stringOption(name: string): string | null {
+    const value = this.option(name);
+    return typeof value === "string" ? value : null;
+  }
+
   /** Acknowledge now; the command will supply its reply later. Replies are always ephemeral. */
   public abstract defer(): Promise<void>;
   public abstract reply(reply: SlashReply): Promise<void>;

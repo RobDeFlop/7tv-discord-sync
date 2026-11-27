@@ -71,8 +71,10 @@ export class EmoteAddPreviews {
           : message.reason === "emote-promotion-unavailable" ? "to start over." : null;
         return nextStep ? { ...message, text: `${message.text} Run \`/${pending.commandPath}\` again ${nextStep}` } : message;
       }));
-    } catch {
-      Logger.write(LogLevel.error, `/${pending.commandPath} confirmation failed in ${pending.serverId}.`);
+    } catch (error) {
+      const server = Logger.field(pending.serverId);
+      const command = Logger.field(pending.commandPath);
+      Logger.write(LogLevel.error, `emote_confirmation_failed operation=apply_requested_emote server=${server} command=${command} ${Logger.failure(error)}`);
       reply = `Something went wrong. Run \`/${pending.commandPath}\` again to retry.`;
     }
     await request.reply(reply);

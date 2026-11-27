@@ -30,14 +30,8 @@ class FakeRequest extends SlashRequest {
     super();
   }
 
-  public stringOption(name: string): string | null {
-    const v = this.options[name];
-    return typeof v === "string" ? v : null;
-  }
-
-  public booleanOption(name: string): boolean | null {
-    const v = this.options[name];
-    return typeof v === "boolean" ? v : null;
+  public option(name: string): unknown {
+    return this.options[name];
   }
 
   public async defer(): Promise<void> {
@@ -654,14 +648,21 @@ describe("commands translate to core calls", () => {
     expect(discord.emojis(S).map((e) => e.name)).toEqual(["Pog"]);
   });
 
+  test.each(["year", true])("/trending rejects invalid period %p before mutating settings", async (period) => {
+    const { run, events, store, sevenTv } = setup();
+    const lookups = spyOn(sevenTv, "getTrending");
+    const reply = await run("trending", { state: "on", period });
+    await events.idle();
+    expect(reply.edits.at(-1)).toContain("Invalid Trending Fill period");
+    expect(await store.listServers()).toEqual([]);
+    expect(lookups).not.toHaveBeenCalled();
+  });
+
   test("/trending on|off applies the validated period and edits the original reply", async () => {
     const { core, run, events } = setup();
     const enabled = await run("trending", { state: "on", period: "month" });
     await events.idle();
     expect(enabled.edits.at(-1)).toContain("Trending Fill is on (month)");
-    const invalid = await run("trending", { state: "on", period: "year" });
-    await events.idle();
-    expect(invalid.edits.at(-1)).toContain("Choose a Trending Fill period");
     expect((await core.status(S)).trending.period).toBe("month");
     const disabled = await run("trending", { state: "off" });
     await events.idle();
@@ -896,9 +897,9 @@ describe("registration", () => {
     });
     const emote = defs.find((d) => d.name === "emote")!;
     expect(emote.options?.map((o) => o.name)).toEqual(["add", "remove"]);
-    expect(emote.options?.find((o) => o.name === "add")?.options).toEqual([
-      expect.objectContaining({ name: "link", required: true }),
-    ]);
+    expect(emote.options?.find((o) => o.name === "add")).toMatchObject({
+      options: [{ name: "link", required: true }],
+    });
     for (const d of defs) expect(d.default_member_permissions).toBe("8");
   });
 });

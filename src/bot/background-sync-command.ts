@@ -15,7 +15,7 @@ export abstract class BackgroundSyncCommand extends SlashCommand {
     await request.reply({ title: "Sync queued", description: "This private reply will be updated with the result." });
     const observer = this.feedback.privateReply(request);
     void this.schedule(server, request, observer).catch(async (error: unknown) => {
-      Logger.write(LogLevel.error, `sync_failed server=${server} operation=request error_kind=${error instanceof Error ? "Error" : typeof error}`);
+      Logger.write(LogLevel.error, `sync_failed operation=request server=${Logger.field(server)} ${Logger.failure(error)}`);
       await observer(server, {
         kind: "finished",
         result: { changes: [], feedback: [{ level: "error", text: "Could not queue this sync. Try again in a moment." }] },

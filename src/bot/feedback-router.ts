@@ -53,7 +53,7 @@ export class FeedbackRouter {
           await recipient.editOriginal(FeedbackRouter.format([...(setting ?? []), ...feedback]));
           return;
         } catch (error) {
-          Logger.write(LogLevel.error, `sync_reply_edit_failed server=${server} operation=edit_original error_kind=${error instanceof Error ? "Error" : typeof error}`);
+          Logger.write(LogLevel.error, `sync_reply_edit_failed operation=edit_original server=${Logger.field(server)} ${Logger.failure(error)}`);
         } finally {
           if (update.kind !== "paused") recipient = undefined;
         }
@@ -66,20 +66,14 @@ export class FeedbackRouter {
   /** Feedback goes to the configured log channel if any; status is available regardless. */
   public async deliver(server: ServerId, result: SyncResult): Promise<void> {
     if (result.feedback.length === 0) return;
+    let operation = "load_log_channel";
     try {
       const channelId = await this.core.logChannelId(server);
       if (!channelId) return;
+      operation = "send_log_embed";
       await this.logChannel.send(channelId, FeedbackRouter.embeds(result.feedback));
-    } catch (err) {
-      // Discord errors can contain interaction tokens. Only include numeric diagnostics.
-      const details = [`Could not deliver feedback for ${server}:`];
-      if (err !== null && typeof err === "object") {
-        for (const key of ["status", "code"]) {
-          const value = Object.getOwnPropertyDescriptor(err, key)?.value;
-          if (Number.isSafeInteger(value)) details.push(`${key}=${value}`);
-        }
-      }
-      Logger.write(LogLevel.error, details.join(" "));
+    } catch (error) {
+      Logger.write(LogLevel.error, `feedback_delivery_failed operation=${operation} server=${Logger.field(server)} ${Logger.failure(error)}`);
     }
   }
 

@@ -1,11 +1,13 @@
-import { expect, mock, test } from "bun:test";
+import { expect, mock, spyOn, test } from "bun:test";
 import {
+  Client,
+  DiscordAPIError,
   MessageFlags,
   PermissionFlagsBits,
   PermissionsBitField,
   type APIEmbed,
   type ChatInputCommandInteraction,
-  type Client,
+  type Interaction,
   type InteractionEditReplyOptions,
 } from "discord.js";
 import { SyncCore } from "../core/index.ts";
@@ -15,6 +17,54 @@ import { DiscordBot, DiscordJsSlashRequest } from "./discordjs-bot.ts";
 import { FeedbackRouter } from "./feedback-router.ts";
 import { GatewayEvents } from "./gateway-events.ts";
 import { SlashCommandRegistry } from "./slash-command-registry.ts";
+
+function gatewayFixture() {
+  const client = new Client({ intents: [] });
+  const store = new FakeStore();
+  const core = new SyncCore(new FakeSevenTv(), new FakeDiscord(), store);
+  const log = DiscordBot.logChannel(client);
+  const feedback = new FeedbackRouter(core, log);
+  const events = new GatewayEvents(core, feedback, new FakeServers());
+  const registry = new SlashCommandRegistry(core, feedback, log);
+  spyOn(client, "login").mockResolvedValue("unused");
+  return { bot: new DiscordBot(client, events, registry), client, events, registry };
+}
+
+test("interaction failures log the SDK error class without logging the interaction token", async () => {
+  const { bot, client, registry } = gatewayFixture();
+  const token = "sensitive-test-interaction-token";
+  const error = new DiscordAPIError({ message: `Unknown interaction ${token}`, code: 10062 }, 10062, 404,
+    "POST", `https://discord.com/api/v10/interactions/123/${token}/callback`, { body: { token }, files: undefined });
+  spyOn(registry, "handle").mockRejectedValueOnce(error);
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await bot.start("unused");
+    client.emit("interactionCreate", { guildId: "123", isChatInputCommand: () => true } as unknown as Interaction);
+    await Bun.sleep(0);
+    expect(logged.mock.calls).toEqual([[expect.stringMatching(
+      / ERROR interaction_failed operation=handle_interaction server=123 error=DiscordAPIError status=404 code=10062$/,
+    )]]);
+    expect(logged.mock.calls[0]?.[0]).not.toContain(token);
+  } finally {
+    logged.mockRestore();
+    await bot.stop();
+  }
+});
+
+test("startup failure identifies the failed operation", async () => {
+  const { bot, client, events } = gatewayFixture();
+  spyOn(events, "catchUp").mockRejectedValueOnce(new Error("private startup data"));
+  const logged = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await bot.start("unused");
+    client.emit("clientReady", client as Client<true>);
+    await Bun.sleep(0);
+    expect(logged.mock.calls).toEqual([[expect.stringMatching(/ ERROR startup_failed operation=catch_up_servers error=Error$/)]]);
+  } finally {
+    logged.mockRestore();
+    await bot.stop();
+  }
+});
 
 test("DiscordJsSlashRequest sends the queue confirmation as an ephemeral deferred embed", async () => {
   const interaction = {

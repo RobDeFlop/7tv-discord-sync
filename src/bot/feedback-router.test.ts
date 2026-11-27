@@ -19,10 +19,10 @@ test("a failed Discord request logs the operation and numeric diagnostics, not t
     const router = new FeedbackRouter(new SyncCore(new FakeSevenTv(), new FakeDiscord(), store), channel);
     const result = { changes: [], feedback: [{ level: "error" as const, text: "Failed" }] };
     await router.deliver("123", result);
-    expect(logged.mock.calls[0]).toEqual([expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z ERROR Could not deliver feedback for 123: status=404 code=10062$/)]);
+    expect(logged.mock.calls[0]).toEqual([expect.stringMatching(/ ERROR feedback_delivery_failed operation=send_log_embed server=123 error=Error status=404 code=10062$/)]);
     spyOn(channel, "send").mockRejectedValue({ code: "private-token", status: "private-token" });
     await router.deliver("123", result);
-    expect(logged.mock.calls[1]).toEqual([expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z ERROR Could not deliver feedback for 123:$/)]);
+    expect(logged.mock.calls[1]).toEqual([expect.stringMatching(/ ERROR feedback_delivery_failed operation=send_log_embed server=123 error=object$/)]);
   } finally {
     logged.mockRestore();
   }

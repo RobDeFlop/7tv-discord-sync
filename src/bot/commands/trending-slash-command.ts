@@ -19,14 +19,14 @@ export class TrendingSlashCommand extends BackgroundSyncCommand {
   ];
 
   protected override async schedule(server: ServerId, request: SlashRequest, observer: SyncObserver): Promise<void> {
-    const state = this.requiredString(request, "state");
-    const period = request.stringOption("period");
+    const state = request.option("state");
+    const period = request.option("period");
     if (state !== "on" && state !== "off") {
       await TrendingSlashCommand.reject(server, observer, "Choose on or off for Trending Fill.");
-    } else if (period !== null && period !== "day" && period !== "week" && period !== "month" && period !== "all-time") {
-      await TrendingSlashCommand.reject(server, observer, "Choose a Trending Fill period: day, week, month, or all-time.");
+    } else if (period !== undefined && period !== "day" && period !== "week" && period !== "month" && period !== "all-time") {
+      await TrendingSlashCommand.reject(server, observer, "Invalid Trending Fill period. Choose day, week, month, or all-time.");
     } else {
-      await this.core.apply(server, new SetTrendingCommand(state === "on", period ?? undefined), observer);
+      await this.core.apply(server, new SetTrendingCommand(state === "on", period), observer);
     }
   }
 

@@ -31,7 +31,7 @@ export class GatewayEvents {
     try {
       await this.core.removeServer(server);
     } catch (error) {
-      Logger.write(LogLevel.error, `server_remove_failed server=${server} error_kind=${error instanceof Error ? "Error" : typeof error}`);
+      Logger.write(LogLevel.error, `server_remove_failed operation=remove_state server=${Logger.field(server)} ${Logger.failure(error)}`);
     }
   }
 
@@ -56,7 +56,7 @@ export class GatewayEvents {
   public listenToSevenTv(sevenTv: SevenTvPort): () => void {
     return sevenTv.subscribe((change) => {
       const work = this.sevenTvChanged(change).catch((error: unknown) => {
-        Logger.write(LogLevel.error, `seventv_change_failed operation=find_targets error_kind=${error instanceof Error ? "Error" : typeof error}`);
+        Logger.write(LogLevel.error, `seventv_change_failed operation=find_targets ${Logger.failure(error)}`);
       }).finally(() => this.changes.delete(work));
       this.changes.add(work);
     });
@@ -80,7 +80,7 @@ export class GatewayEvents {
 
   private queue(server: ServerId): void {
     void this.core.reconcile(server, this.deliveries).catch((error: unknown) => {
-      Logger.write(LogLevel.error, `sync_failed server=${server} operation=schedule error_kind=${error instanceof Error ? "Error" : typeof error}`);
+      Logger.write(LogLevel.error, `sync_failed operation=schedule server=${Logger.field(server)} ${Logger.failure(error)}`);
     });
   }
 }
