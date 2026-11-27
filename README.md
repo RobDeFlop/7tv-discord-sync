@@ -114,6 +114,8 @@ The bot also syncs on its own when it joins a server, when emojis change, when t
 
 ## Development
 
+Maintainers: see [Publishing the GHCR image](docs/publishing.md) for the release tag policy, one-time package setup, and anonymous pull check.
+
 ```sh
 bun test            # run the tests
 bun run typecheck   # type-check
