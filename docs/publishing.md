@@ -1,6 +1,6 @@
 # Publishing the GHCR image
 
-The release image is `ghcr.io/robdeflop/7tv-discord-sync` (Linux/AMD64). The GitHub repository stays private. Publish only commits approved for release: the **image** contains the runtime source and can be inspected by anyone once public.
+The release image is `ghcr.io/robdeflop/7tv-discord-sync` (Linux/AMD64). The GitHub repository is public. Publish only commits approved for release: once the package is public, anyone can pull the **image** and inspect its runtime source.
 
 ## Release gate
 
@@ -23,7 +23,7 @@ After the first successful publish, open the **7tv-discord-sync package** under 
 
 ## Public installation instructions
 
-The public [GHCR package page](https://github.com/users/RobDeFlop/packages/container/package/7tv-discord-sync) shows the retrieval command from the image's `org.opencontainers.image.description` label. Share the package page, not this private source repository. The command copies the version-matched Compose files, `.example.env` and operator guide out of an unstarted container. No separate installation repository or GitHub Release assets are needed.
+The public [GHCR package page](https://github.com/users/RobDeFlop/packages/container/package/7tv-discord-sync) shows the retrieval command from the image's `org.opencontainers.image.description` label. Operators can install from the package page without cloning this repository. The command copies the version-matched Compose files, `.example.env` and operator guide out of an unstarted container. No separate installation repository or GitHub Release assets are needed.
 
 ## Verify anonymous access
 
@@ -35,4 +35,4 @@ docker --config "$config" pull --platform linux/amd64 ghcr.io/robdeflop/7tv-disc
 rmdir "$config"
 ```
 
-A successful pull reports the image digest and requires neither source access nor `docker login`. While signed out of GitHub, check that the package page displays the copy instructions. To read the same instructions directly for a particular pulled version, use `docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.description"}}' ghcr.io/robdeflop/7tv-discord-sync:1.0.0`. If denied, check **package** visibility and the exact image name and tag; do not change repository visibility.
+A successful pull reports the image digest and requires neither source access nor `docker login`. While signed out of GitHub, check that the package page displays the copy instructions. To read the same instructions directly for a particular pulled version, use `docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.description"}}' ghcr.io/robdeflop/7tv-discord-sync:1.0.0`. If denied, check **package** visibility and the exact image name and tag.
