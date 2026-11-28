@@ -28,6 +28,7 @@ Fix the cause with the smallest change that satisfies the requirement. Reuse exi
 - Import the owning SDK, port or domain type rather than cloning it. Derive shared shapes from the canonical schema or use generated contracts when available; do not invent a parallel API generator for this bot. For a Drizzle schema change, run `bun run db:generate`, inspect the SQL and include the migration and metadata together. Test migration and snapshot round-tripping against PostgreSQL.
 - Put behavior on classes; use a private or static method for an owning class's helper, not a factory returning a bag of functions. Declare member visibility; default fields to `private readonly`. Return read-only collections or copies. Mutate `ServerState` through methods and persist via `toSnapshot()` / `fromSnapshot()`.
 - Keep IDs, names and simple unions as aliases. Use interfaces or types for behavior-free records and an immutable class for a multi-field domain value or one with behavior. Use implicit enum values unless storage or a wire contract requires explicit values.
+- In conditions, use booleans directly or negate them with `!` rather than comparing them to `true` or `false`. Check for `null` explicitly when it represents a distinct unknown state.
 
 ## Failures and diagnostics
 

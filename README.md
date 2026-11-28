@@ -204,5 +204,3 @@ docker stop 7tv-sync-test-db
 ## Contributing
 
 Specs, requests and progress are tracked in [GitHub Issues](https://github.com/RobDeFlop/7tv-discord-sync/issues). Contributor and agent rules, including architecture and TypeScript standards, are in [AGENTS.md](AGENTS.md); architectural decisions are under [`docs/adr/`](docs/adr/).
-
-In conditions, use booleans directly or negate them with `!` rather than comparing them to `true` or `false`. Check for `null` explicitly when it represents a distinct unknown state.
